@@ -81,8 +81,8 @@ async function main() {
     const app = express();
     const port = parseInt(process.env.PORT || '3000', 10);
 
-    // Store active transports by session ID
-    const transports = new Map<string, SSEServerTransport>();
+    // Single transport for simplicity (supports one client at a time)
+    let activeTransport: SSEServerTransport | null = null;
 
     // Health check endpoint
     app.get('/health', (_req: Request, res: Response) => {
@@ -100,54 +100,37 @@ async function main() {
       console.log('New SSE connection established');
 
       const transport = new SSEServerTransport('/message', res);
-
-      // Get the session ID from the transport after it's initialized
-      // The transport sends this to the client in the endpoint event
-      const sessionId = crypto.randomUUID();
-      transports.set(sessionId, transport);
+      activeTransport = transport;
 
       // Clean up on connection close
       res.on('close', () => {
         console.log('SSE connection closed');
-        transports.delete(sessionId);
+        if (activeTransport === transport) {
+          activeTransport = null;
+        }
       });
 
       await server.connect(transport);
     });
 
     // Message endpoint for client-to-server communication
-    app.post('/message', express.json(), async (req: Request, res: Response) => {
-      // Get session ID from query parameter
-      const sessionId = req.query.sessionId as string;
+    app.post('/message', async (req: Request, res: Response) => {
+      console.log('POST /message received');
 
-      if (sessionId) {
-        const transport = transports.get(sessionId);
-        if (transport) {
-          try {
-            await transport.handlePostMessage(req, res);
-            return;
-          } catch (error) {
-            console.error('Error handling message:', error);
-            res.status(500).json({ error: 'Internal server error' });
-            return;
-          }
-        }
+      if (!activeTransport) {
+        console.log('No active transport');
+        res.status(404).json({ error: 'No active session' });
+        return;
       }
 
-      // Fallback: try the most recent transport (for clients that don't send sessionId)
-      const allTransports = Array.from(transports.values());
-      if (allTransports.length > 0) {
-        try {
-          await allTransports[allTransports.length - 1].handlePostMessage(req, res);
-          return;
-        } catch (error) {
-          console.error('Error handling message:', error);
+      try {
+        await activeTransport.handlePostMessage(req, res);
+      } catch (error) {
+        console.error('Error handling message:', error);
+        if (!res.headersSent) {
           res.status(500).json({ error: 'Internal server error' });
-          return;
         }
       }
-
-      res.status(404).json({ error: 'No active session' });
     });
 
     app.listen(port, () => {
