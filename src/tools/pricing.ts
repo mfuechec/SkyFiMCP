@@ -50,7 +50,14 @@ function parseLocationToWKT(location: string | Record<string, unknown>): string 
       // Not JSON
     }
 
-    throw new Error(`Invalid location format: "${location}"`);
+    throw new Error(
+      `Invalid location format: "${location}". ` +
+      `Location must be numeric coordinates:\n` +
+      `- Coordinates: "37.7749,-122.4194"\n` +
+      `- GeoJSON: '{"type":"Point","coordinates":[-122.4194,37.7749]}'\n` +
+      `- WKT POLYGON\n\n` +
+      `Place names are not supported.`
+    );
   }
 
   // If it's an object, assume it's GeoJSON
@@ -58,21 +65,29 @@ function parseLocationToWKT(location: string | Record<string, unknown>): string 
     return geoJSONToWKT(location as unknown as GeoJSON);
   }
 
-  throw new Error('Invalid location format');
+  throw new Error(
+    `Invalid location format. Expected coordinates "lat,lng", GeoJSON, or WKT POLYGON.`
+  );
 }
 
 // ==================== Get Pricing Estimate Tool ====================
 
 const getPricingEstimateDefinition = {
   name: 'get_pricing_estimate',
-  description:
-    'Get pricing information for satellite imagery based on area of interest. Returns a pricing matrix for available products and resolutions.',
+  description: `Get pricing information for satellite imagery. Returns a pricing matrix for available products and resolutions.
+
+Location format (optional):
+- Coordinates: "37.7749,-122.4194" (latitude,longitude)
+- GeoJSON: '{"type":"Point","coordinates":[-122.4194,37.7749]}'
+- WKT POLYGON: "POLYGON((-122.42 37.77, -122.41 37.77, -122.41 37.78, -122.42 37.78, -122.42 37.77))"
+
+If no location provided, returns general pricing matrix.`,
   inputSchema: {
     type: 'object',
     properties: {
       location: {
         type: 'string',
-        description: 'Location as coordinates "lat,lng", GeoJSON string, or WKT POLYGON (optional)',
+        description: 'Coordinates as "lat,lng" (e.g., "37.7749,-122.4194"), GeoJSON string, or WKT POLYGON',
       },
     },
     required: [],
@@ -166,30 +181,41 @@ async function getPricingEstimateHandler(
 
 const checkOrderFeasibilityDefinition = {
   name: 'check_order_feasibility',
-  description:
-    'Check if an order for satellite imagery is feasible. Returns whether the order can be fulfilled, reasons if not feasible, and alternative options.',
+  description: `Check if a satellite imagery tasking order is feasible for a given location and time window.
+
+IMPORTANT - Location format (REQUIRED):
+- Coordinates: "37.7749,-122.4194" (latitude,longitude as decimal degrees)
+- GeoJSON: '{"type":"Point","coordinates":[-122.4194,37.7749]}' (longitude first!)
+- WKT POLYGON: "POLYGON((-122.42 37.77, -122.41 37.77, -122.41 37.78, -122.42 37.78, -122.42 37.77))"
+
+Do NOT use place names like "San Francisco" - you must provide numeric coordinates.
+
+Date format: YYYY-MM-DD (e.g., "2024-01-15")
+Resolution format: string with unit (e.g., "0.5m", "1m", "2m")
+
+Returns feasibility status, satellite pass predictions, and alternatives if not feasible.`,
   inputSchema: {
     type: 'object',
     properties: {
       location: {
         type: 'string',
-        description: 'Location as coordinates "lat,lng", GeoJSON string, or WKT POLYGON',
+        description: 'REQUIRED. Coordinates as "lat,lng" (e.g., "37.7749,-122.4194"), GeoJSON string, or WKT POLYGON. Do NOT use place names.',
       },
       fromDate: {
         type: 'string',
-        description: 'Start date for feasibility check in ISO 8601 format (optional)',
+        description: 'Start date in YYYY-MM-DD format (e.g., "2024-01-15")',
       },
       toDate: {
         type: 'string',
-        description: 'End date for feasibility check in ISO 8601 format (optional)',
+        description: 'End date in YYYY-MM-DD format (e.g., "2024-02-15")',
       },
       productType: {
         type: 'string',
-        description: 'Product type for feasibility check (optional)',
+        description: 'Product type (e.g., "OPTICAL", "SAR")',
       },
       resolution: {
         type: 'string',
-        description: 'Desired resolution (e.g., "0.5m", "1m") (optional)',
+        description: 'Desired resolution with unit (e.g., "0.5m", "1m", "2m")',
       },
     },
     required: ['location'],

@@ -66,42 +66,59 @@ function parseLocationToWKT(location: string): string {
     // Not JSON
   }
 
-  throw new Error(`Invalid location format: "${location}"`);
+  throw new Error(
+    `Invalid location format: "${location}". ` +
+    `Location must be numeric coordinates:\n` +
+    `- Coordinates: "37.7749,-122.4194" (latitude,longitude)\n` +
+    `- GeoJSON: '{"type":"Point","coordinates":[-122.4194,37.7749]}'\n` +
+    `- WKT POLYGON\n\n` +
+    `Place names like "San Francisco" are not supported.`
+  );
 }
 
 // ==================== Place Archive Order Tool ====================
 
 const placeArchiveOrderDefinition = {
   name: 'place_archive_order',
-  description:
-    'Place an order for existing archive satellite imagery. Use search_archive first to find available imagery.',
+  description: `Place an order for existing archive satellite imagery.
+
+WORKFLOW: First use search_archive to find available imagery, then use the archiveId from the results.
+
+Location format (REQUIRED):
+- Coordinates: "37.7749,-122.4194" (latitude,longitude)
+- GeoJSON: '{"type":"Point","coordinates":[-122.4194,37.7749]}'
+- WKT POLYGON: "POLYGON((-122.42 37.77, -122.41 37.77, -122.41 37.78, -122.42 37.78, -122.42 37.77))"
+
+Do NOT use place names - you must provide numeric coordinates.
+
+Delivery drivers: S3 (AWS), GS (Google Cloud), AZURE (Azure Blob)`,
   inputSchema: {
     type: 'object',
     properties: {
       archiveId: {
         type: 'string',
-        description: 'ID of the archive image to order (from search_archive results)',
+        description: 'REQUIRED. Archive ID from search_archive results (e.g., "abc123-def456")',
       },
       location: {
         type: 'string',
-        description: 'Area of interest as coordinates "lat,lng", GeoJSON string, or WKT POLYGON',
+        description: 'REQUIRED. Coordinates as "lat,lng" (e.g., "37.7749,-122.4194"), GeoJSON string, or WKT POLYGON',
       },
       deliveryDriver: {
         type: 'string',
         enum: ['S3', 'GS', 'AZURE'],
-        description: 'Cloud storage provider for delivery (S3, GS, or AZURE)',
+        description: 'REQUIRED. Cloud storage: S3 (AWS), GS (Google Cloud), or AZURE',
       },
       deliveryBucket: {
         type: 'string',
-        description: 'Bucket name for delivery',
+        description: 'REQUIRED. Your bucket name (e.g., "my-imagery-bucket")',
       },
       deliveryPath: {
         type: 'string',
-        description: 'Path within the delivery bucket (optional)',
+        description: 'Path within bucket (e.g., "imagery/2024/")',
       },
       webhookUrl: {
         type: 'string',
-        description: 'URL to receive webhook notifications about order status (optional)',
+        description: 'URL for status notifications (e.g., "https://myapi.com/webhooks/skyfi")',
       },
     },
     required: ['archiveId', 'location', 'deliveryDriver', 'deliveryBucket'],
@@ -273,63 +290,71 @@ async function placeArchiveOrderHandler(args: Record<string, unknown>): Promise<
 
 const placeTaskingOrderDefinition = {
   name: 'place_tasking_order',
-  description:
-    'Place a tasking order for new satellite imagery capture. Use check_order_feasibility first to verify availability.',
+  description: `Place a tasking order for NEW satellite imagery capture (not archive imagery).
+
+WORKFLOW: Use check_order_feasibility first to verify the satellite can capture imagery for your location and dates.
+
+Location format (REQUIRED):
+- Coordinates: "37.7749,-122.4194" (latitude,longitude)
+- GeoJSON: '{"type":"Point","coordinates":[-122.4194,37.7749]}'
+- WKT POLYGON: "POLYGON((-122.42 37.77, -122.41 37.77, -122.41 37.78, -122.42 37.78, -122.42 37.77))"
+
+Do NOT use place names - you must provide numeric coordinates.
+
+Date format: YYYY-MM-DD (e.g., "2024-01-15")
+Resolution format: string with unit (e.g., "0.5m", "1m", "2m")
+Delivery drivers: S3 (AWS), GS (Google Cloud), AZURE (Azure Blob)`,
   inputSchema: {
     type: 'object',
     properties: {
       location: {
         type: 'string',
-        description: 'Location as coordinates "lat,lng", GeoJSON string, or WKT POLYGON',
+        description: 'REQUIRED. Coordinates as "lat,lng" (e.g., "37.7749,-122.4194"), GeoJSON string, or WKT POLYGON',
       },
       windowStart: {
         type: 'string',
-        description: 'Start date for capture window in ISO 8601 format',
+        description: 'REQUIRED. Capture window start in YYYY-MM-DD format (e.g., "2024-01-15")',
       },
       windowEnd: {
         type: 'string',
-        description: 'End date for capture window in ISO 8601 format',
+        description: 'REQUIRED. Capture window end in YYYY-MM-DD format (e.g., "2024-02-15")',
       },
       productType: {
         type: 'string',
-        description: 'Product type for the imagery',
+        description: 'REQUIRED. Product type (e.g., "OPTICAL", "SAR")',
       },
       resolution: {
         type: 'string',
-        description: 'Desired resolution (e.g., "0.5m", "1m")',
-      },
-      cloudCoverMax: {
-        type: 'number',
-        description: 'Maximum acceptable cloud coverage percentage (0-100, optional)',
-      },
-      offNadirMax: {
-        type: 'number',
-        description: 'Maximum off-nadir angle in degrees (optional)',
-      },
-      priorityItem: {
-        type: 'string',
-        description: 'Priority item identifier (optional)',
+        description: 'REQUIRED. Resolution with unit (e.g., "0.5m", "1m", "2m")',
       },
       deliveryDriver: {
         type: 'string',
         enum: ['S3', 'GS', 'AZURE'],
-        description: 'Cloud storage provider for delivery (S3, GS, or AZURE)',
+        description: 'REQUIRED. Cloud storage: S3 (AWS), GS (Google Cloud), or AZURE',
       },
       deliveryBucket: {
         type: 'string',
-        description: 'Bucket name for delivery',
+        description: 'REQUIRED. Your bucket name (e.g., "my-imagery-bucket")',
+      },
+      cloudCoverMax: {
+        type: 'number',
+        description: 'Max cloud coverage 0-100 (e.g., 20 for max 20% clouds)',
+      },
+      offNadirMax: {
+        type: 'number',
+        description: 'Max off-nadir angle 0-90 degrees (e.g., 30)',
       },
       deliveryPath: {
         type: 'string',
-        description: 'Path within the delivery bucket (optional)',
+        description: 'Path within bucket (e.g., "imagery/2024/")',
       },
       webhookUrl: {
         type: 'string',
-        description: 'URL to receive webhook notifications about order status (optional)',
+        description: 'URL for status notifications',
       },
       requiredProvider: {
         type: 'string',
-        description: 'Specific provider to use for tasking (optional)',
+        description: 'Specific provider (e.g., "MAXAR", "PLANET")',
       },
     },
     required: ['location', 'windowStart', 'windowEnd', 'productType', 'resolution', 'deliveryDriver', 'deliveryBucket'],

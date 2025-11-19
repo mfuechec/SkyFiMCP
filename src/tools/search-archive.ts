@@ -19,57 +19,58 @@ import { geoJSONToWKT } from '../services/skyfi/types.js';
 // Tool definition with comprehensive parameter schema
 const searchArchiveToolDefinition = {
   name: 'search_archive',
-  description:
-    'Search the SkyFi satellite imagery archive. Returns available imagery based on location, date range, resolution, and other filters.',
+  description: `Search the SkyFi satellite imagery archive for existing imagery.
+
+IMPORTANT: Location must be in one of these formats:
+- Coordinates: "37.7749,-122.4194" (latitude,longitude as decimal degrees)
+- GeoJSON: '{"type":"Point","coordinates":[-122.4194,37.7749]}' (note: longitude first in coordinates)
+- WKT POLYGON: "POLYGON((-122.42 37.77, -122.41 37.77, -122.41 37.78, -122.42 37.78, -122.42 37.77))"
+
+Do NOT use place names like "San Francisco" - you must provide numeric coordinates.
+
+Date format: YYYY-MM-DD (e.g., "2024-01-15")
+
+Returns archive imagery with archiveId that can be used for ordering.`,
   inputSchema: {
     type: 'object',
     properties: {
       location: {
         type: 'string',
-        description:
-          'Location to search. Can be coordinates as "lat,lng" (e.g., "37.7749,-122.4194"), GeoJSON object as a JSON string, or WKT POLYGON format.',
+        description: 'REQUIRED. Coordinates as "lat,lng" (e.g., "37.7749,-122.4194"), GeoJSON string, or WKT POLYGON. Do NOT use place names.',
       },
       startDate: {
         type: 'string',
-        description:
-          'Start date for imagery search in ISO 8601 format (e.g., "2024-01-01"). Optional.',
+        description: 'Start date in YYYY-MM-DD format (e.g., "2024-01-01")',
       },
       endDate: {
         type: 'string',
-        description:
-          'End date for imagery search in ISO 8601 format (e.g., "2024-12-31"). Optional.',
+        description: 'End date in YYYY-MM-DD format (e.g., "2024-12-31")',
       },
       providers: {
         type: 'array',
         items: { type: 'string' },
-        description:
-          'Filter by specific providers. Optional.',
+        description: 'Filter by providers (e.g., ["MAXAR", "PLANET", "AIRBUS"])',
       },
       productTypes: {
         type: 'array',
         items: { type: 'string' },
-        description:
-          'Filter by product types. Optional.',
+        description: 'Filter by product types',
       },
       cloudCoverMax: {
         type: 'number',
-        description:
-          'Maximum cloud coverage percentage (0-100). Optional.',
+        description: 'Maximum cloud coverage percentage, 0-100 (e.g., 20 for max 20% clouds)',
       },
       offNadirMax: {
         type: 'number',
-        description:
-          'Maximum off-nadir angle in degrees. Optional.',
+        description: 'Maximum off-nadir angle in degrees, 0-90 (e.g., 30)',
       },
       openDataOnly: {
         type: 'boolean',
-        description:
-          'If true, only return free/open data imagery. Default is false. Optional.',
+        description: 'If true, only return free/open data imagery',
       },
       limit: {
         type: 'number',
-        description:
-          'Maximum number of results to return. Default is 10, max is 100. Optional.',
+        description: 'Max results to return (1-100, default 10)',
       },
     },
     required: ['location'],
@@ -148,7 +149,12 @@ function parseLocationToWKT(location: string): string {
 
   // Cannot geocode place names - require explicit coordinates
   throw new Error(
-    `Invalid location format: "${location}". Please provide coordinates (lat,lng), GeoJSON, or WKT POLYGON.`
+    `Invalid location format: "${location}". ` +
+    `Location must be numeric coordinates in one of these formats:\n` +
+    `- Coordinates: "37.7749,-122.4194" (latitude,longitude)\n` +
+    `- GeoJSON: '{"type":"Point","coordinates":[-122.4194,37.7749]}'\n` +
+    `- WKT: "POLYGON((-122.42 37.77, -122.41 37.77, ...))"\n\n` +
+    `Place names like "San Francisco" are not supported. Please use numeric coordinates.`
   );
 }
 

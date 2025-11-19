@@ -66,7 +66,14 @@ function parseLocationToWKT(location: string | Record<string, unknown>): string 
       // Not JSON
     }
 
-    throw new Error(`Invalid location format: "${location}"`);
+    throw new Error(
+      `Invalid location format: "${location}". ` +
+      `Location must be numeric coordinates:\n` +
+      `- Coordinates: "37.7749,-122.4194" (latitude,longitude)\n` +
+      `- GeoJSON: '{"type":"Point","coordinates":[-122.4194,37.7749]}'\n` +
+      `- WKT POLYGON\n\n` +
+      `Place names like "San Francisco" are not supported.`
+    );
   }
 
   // If it's an object, assume it's GeoJSON
@@ -74,37 +81,47 @@ function parseLocationToWKT(location: string | Record<string, unknown>): string 
     return geoJSONToWKT(location as unknown as GeoJSON);
   }
 
-  throw new Error('Invalid location format');
+  throw new Error(
+    `Invalid location format. Expected coordinates "lat,lng", GeoJSON, or WKT POLYGON.`
+  );
 }
 
 // ==================== Create Monitor Tool ====================
 
 const createMonitorDefinition = {
   name: 'create_monitor',
-  description:
-    'Create a new monitor (notification) for an area of interest. Monitors track changes in satellite imagery availability and send notifications via webhook.',
+  description: `Create a monitor to receive webhook notifications when new satellite imagery becomes available for an area.
+
+Location format (REQUIRED):
+- Coordinates: "37.7749,-122.4194" (latitude,longitude)
+- GeoJSON: '{"type":"Point","coordinates":[-122.4194,37.7749]}'
+- WKT POLYGON: "POLYGON((-122.42 37.77, -122.41 37.77, -122.41 37.78, -122.42 37.78, -122.42 37.77))"
+
+Do NOT use place names - you must provide numeric coordinates.
+
+GSD (Ground Sample Distance) is resolution in meters. Lower GSD = higher resolution imagery.`,
   inputSchema: {
     type: 'object',
     properties: {
       location: {
         type: 'string',
-        description: 'Location as coordinates "lat,lng", GeoJSON string, or WKT POLYGON',
+        description: 'REQUIRED. Coordinates as "lat,lng" (e.g., "37.7749,-122.4194"), GeoJSON string, or WKT POLYGON',
       },
       webhookUrl: {
         type: 'string',
-        description: 'URL to receive webhook notifications when new imagery is available',
+        description: 'REQUIRED. URL to receive notifications (e.g., "https://myapi.com/webhooks/skyfi")',
       },
       gsdMin: {
         type: 'number',
-        description: 'Minimum ground sample distance in meters (optional)',
+        description: 'Min resolution in meters (e.g., 0.3 for 30cm)',
       },
       gsdMax: {
         type: 'number',
-        description: 'Maximum ground sample distance in meters (optional)',
+        description: 'Max resolution in meters (e.g., 1.0 for 1m)',
       },
       productType: {
         type: 'string',
-        description: 'Product type filter for the monitor (optional)',
+        description: 'Product type filter (e.g., "OPTICAL", "SAR")',
       },
     },
     required: ['location', 'webhookUrl'],
