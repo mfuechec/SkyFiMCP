@@ -85,10 +85,10 @@ export interface PricingResponse {
 // Feasibility request - matches /feasibility POST
 export interface FeasibilityRequest {
   aoi: string; // WKT POLYGON format
-  fromDate?: string;
-  toDate?: string;
+  startDate?: string;
+  endDate?: string;
   productType?: string;
-  resolution?: string;
+  resolution?: number;
 }
 
 // Feasibility response

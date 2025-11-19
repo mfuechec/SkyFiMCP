@@ -191,7 +191,8 @@ IMPORTANT - Location format (REQUIRED):
 Do NOT use place names like "San Francisco" - you must provide numeric coordinates.
 
 Date format: YYYY-MM-DD (e.g., "2024-01-15")
-Resolution format: string with unit (e.g., "0.5m", "1m", "2m")
+Resolution: number in meters (e.g., 0.5, 1, 2) - NO "m" suffix!
+Product types: DAY, NIGHT, VIDEO, SAR, HYPERSPECTRAL, MULTISPECTRAL, STEREO
 
 Returns feasibility status, satellite pass predictions, and alternatives if not feasible.`,
   inputSchema: {
@@ -201,24 +202,25 @@ Returns feasibility status, satellite pass predictions, and alternatives if not 
         type: 'string',
         description: 'REQUIRED. Coordinates as "lat,lng" (e.g., "37.7749,-122.4194"), GeoJSON string, or WKT POLYGON. Do NOT use place names.',
       },
-      fromDate: {
+      startDate: {
         type: 'string',
-        description: 'Start date in YYYY-MM-DD format (e.g., "2024-01-15")',
+        description: 'REQUIRED. Start date in YYYY-MM-DD format (e.g., "2024-01-15")',
       },
-      toDate: {
+      endDate: {
         type: 'string',
-        description: 'End date in YYYY-MM-DD format (e.g., "2024-02-15")',
+        description: 'REQUIRED. End date in YYYY-MM-DD format (e.g., "2024-02-15")',
       },
       productType: {
         type: 'string',
-        description: 'Product type (e.g., "OPTICAL", "SAR")',
+        enum: ['DAY', 'NIGHT', 'VIDEO', 'SAR', 'HYPERSPECTRAL', 'MULTISPECTRAL', 'STEREO'],
+        description: 'Product type: DAY, NIGHT, VIDEO, SAR, HYPERSPECTRAL, MULTISPECTRAL, or STEREO',
       },
       resolution: {
-        type: 'string',
-        description: 'Desired resolution with unit (e.g., "0.5m", "1m", "2m")',
+        type: 'number',
+        description: 'Resolution in meters as a number (e.g., 0.5, 1, 2) - do NOT include "m" suffix',
       },
     },
-    required: ['location'],
+    required: ['location', 'startDate', 'endDate'],
   },
 };
 
@@ -269,20 +271,20 @@ async function checkOrderFeasibilityHandler(
       aoi,
     };
 
-    if (args.fromDate) {
-      feasibilityRequest.fromDate = args.fromDate as string;
+    if (args.startDate) {
+      feasibilityRequest.startDate = args.startDate as string;
     }
 
-    if (args.toDate) {
-      feasibilityRequest.toDate = args.toDate as string;
+    if (args.endDate) {
+      feasibilityRequest.endDate = args.endDate as string;
     }
 
     if (args.productType) {
       feasibilityRequest.productType = args.productType as string;
     }
 
-    if (args.resolution) {
-      feasibilityRequest.resolution = args.resolution as string;
+    if (args.resolution !== undefined) {
+      feasibilityRequest.resolution = args.resolution as number;
     }
 
     const response: FeasibilityResponse = await client.checkFeasibility(feasibilityRequest);
