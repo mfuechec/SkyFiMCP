@@ -39,15 +39,17 @@ const searchArchiveToolDefinition = {
         description:
           'End date for imagery search in ISO 8601 format (e.g., "2024-12-31"). Optional.',
       },
-      resolutionMin: {
-        type: 'number',
+      providers: {
+        type: 'array',
+        items: { type: 'string' },
         description:
-          'Minimum resolution in meters (e.g., 0.5 for 50cm resolution). Optional.',
+          'Filter by specific providers. Optional.',
       },
-      resolutionMax: {
-        type: 'number',
+      productTypes: {
+        type: 'array',
+        items: { type: 'string' },
         description:
-          'Maximum resolution in meters. Optional.',
+          'Filter by product types. Optional.',
       },
       cloudCoverMax: {
         type: 'number',
@@ -211,7 +213,7 @@ async function searchArchiveHandler(
     if (startDate) {
       try {
         validateDate(startDate, 'startDate');
-        searchRequest.dateFrom = startDate;
+        searchRequest.fromDate = startDate;
       } catch (error) {
         return {
           content: [
@@ -228,7 +230,7 @@ async function searchArchiveHandler(
     if (endDate) {
       try {
         validateDate(endDate, 'endDate');
-        searchRequest.dateTo = endDate;
+        searchRequest.toDate = endDate;
       } catch (error) {
         return {
           content: [
@@ -259,40 +261,6 @@ async function searchArchiveHandler(
       }
     }
 
-    // Add optional resolution range
-    const resolutionMin = args.resolutionMin as number | undefined;
-    const resolutionMax = args.resolutionMax as number | undefined;
-
-    if (resolutionMin !== undefined) {
-      if (resolutionMin <= 0) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Error: Invalid resolutionMin "${resolutionMin}". Must be a positive number.`,
-            },
-          ],
-          isError: true,
-        };
-      }
-      searchRequest.resolutionFrom = resolutionMin;
-    }
-
-    if (resolutionMax !== undefined) {
-      if (resolutionMax <= 0) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Error: Invalid resolutionMax "${resolutionMax}". Must be a positive number.`,
-            },
-          ],
-          isError: true,
-        };
-      }
-      searchRequest.resolutionTo = resolutionMax;
-    }
-
     // Add optional cloud cover
     const cloudCoverMax = args.cloudCoverMax as number | undefined;
     if (cloudCoverMax !== undefined) {
@@ -307,8 +275,7 @@ async function searchArchiveHandler(
           isError: true,
         };
       }
-      searchRequest.cloudCoverFrom = 0;
-      searchRequest.cloudCoverTo = cloudCoverMax;
+      searchRequest.maxCloudCoveragePercent = cloudCoverMax;
     }
 
     // Add optional off-nadir
@@ -325,14 +292,25 @@ async function searchArchiveHandler(
           isError: true,
         };
       }
-      searchRequest.offNadirFrom = 0;
-      searchRequest.offNadirTo = offNadirMax;
+      searchRequest.maxOffNadirAngle = offNadirMax;
     }
 
-    // Add optional openDataOnly flag
+    // Add optional providers
+    const providers = args.providers as string[] | undefined;
+    if (providers && providers.length > 0) {
+      searchRequest.providers = providers;
+    }
+
+    // Add optional product types
+    const productTypes = args.productTypes as string[] | undefined;
+    if (productTypes && productTypes.length > 0) {
+      searchRequest.productTypes = productTypes;
+    }
+
+    // Add optional openData flag
     const openDataOnly = args.openDataOnly as boolean | undefined;
     if (openDataOnly !== undefined) {
-      searchRequest.openDataOnly = openDataOnly;
+      searchRequest.openData = openDataOnly;
     }
 
     // Add optional limit (pageSize)
@@ -359,52 +337,53 @@ async function searchArchiveHandler(
     const response = await client.searchArchive(searchRequest);
 
     // Format results
-    if (response.results.length === 0) {
+    if (response.archives.length === 0) {
       return {
         content: [
           {
             type: 'text',
-            text: `No imagery found for the specified search criteria.\n\nSearch parameters:\n- Location: ${locationArg}${startDate ? `\n- Start date: ${startDate}` : ''}${endDate ? `\n- End date: ${endDate}` : ''}${resolutionMax ? `\n- Max resolution: ${resolutionMax}m` : ''}${cloudCoverMax ? `\n- Max cloud cover: ${cloudCoverMax}%` : ''}${openDataOnly ? `\n- Open data only: yes` : ''}\n\nTry adjusting your search parameters or expanding the date range.`,
+            text: `No imagery found for the specified search criteria.\n\nSearch parameters:\n- Location: ${locationArg}${startDate ? `\n- Start date: ${startDate}` : ''}${endDate ? `\n- End date: ${endDate}` : ''}${cloudCoverMax ? `\n- Max cloud cover: ${cloudCoverMax}%` : ''}${openDataOnly ? `\n- Open data only: yes` : ''}\n\nTry adjusting your search parameters or expanding the date range.`,
           },
         ],
       };
     }
 
     // Format successful results
-    const resultText = response.results
+    const resultText = response.archives
       .map((img, index) => {
         const lines = [
-          `${index + 1}. Archive ID: ${img.archiveId || img.id}`,
+          `${index + 1}. Archive ID: ${img.archiveId}`,
           `   Provider: ${img.provider}`,
-          `   Capture Date: ${img.captureDate}`,
-          `   Resolution: ${img.resolution}m`,
+          `   Product Type: ${img.productType}`,
+          `   Capture Date: ${img.captureTimestamp}`,
+          `   Resolution: ${img.resolution}`,
         ];
 
-        if (img.cloudCover !== undefined) {
-          lines.push(`   Cloud Coverage: ${img.cloudCover}%`);
+        if (img.cloudCoveragePercent !== undefined) {
+          lines.push(`   Cloud Coverage: ${img.cloudCoveragePercent}%`);
         }
 
-        if (img.offNadir !== undefined) {
-          lines.push(`   Off-Nadir: ${img.offNadir}°`);
+        if (img.offNadirAngle !== undefined) {
+          lines.push(`   Off-Nadir: ${img.offNadirAngle}°`);
         }
 
-        if (img.sunElevation !== undefined) {
-          lines.push(`   Sun Elevation: ${img.sunElevation}°`);
+        if (img.priceForOneSquareKm !== undefined) {
+          lines.push(`   Price: $${img.priceForOneSquareKm}/km²`);
         }
 
-        if (img.preview) {
-          lines.push(`   Preview: ${img.preview}`);
+        if (img.deliveryTimeHours !== undefined) {
+          lines.push(`   Delivery: ${img.deliveryTimeHours}h`);
         }
 
-        if (img.thumbnail) {
-          lines.push(`   Thumbnail: ${img.thumbnail}`);
+        if (img.thumbnailUrls?.small) {
+          lines.push(`   Thumbnail: ${img.thumbnailUrls.small}`);
         }
 
         return lines.join('\n');
       })
       .join('\n\n');
 
-    const summary = `Found ${response.total} image(s)${response.hasMore ? ' (more available)' : ''}.`;
+    const summary = `Found ${response.total} image(s)${response.nextPage ? ' (more available)' : ''}.`;
 
     return {
       content: [

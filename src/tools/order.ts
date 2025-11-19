@@ -11,6 +11,7 @@ import type {
   Order,
   GeoJSON,
   GeoJSONPoint,
+  ListOrdersRequest,
 } from '../services/skyfi/types.js';
 import { geoJSONToWKT } from '../services/skyfi/types.js';
 
@@ -81,16 +82,29 @@ const placeArchiveOrderDefinition = {
         type: 'string',
         description: 'ID of the archive image to order (from search_archive results)',
       },
+      location: {
+        type: 'string',
+        description: 'Area of interest as coordinates "lat,lng", GeoJSON string, or WKT POLYGON',
+      },
+      deliveryDriver: {
+        type: 'string',
+        enum: ['S3', 'GS', 'AZURE'],
+        description: 'Cloud storage provider for delivery (S3, GS, or AZURE)',
+      },
       deliveryBucket: {
         type: 'string',
-        description: 'S3 bucket for delivery (optional)',
+        description: 'Bucket name for delivery',
       },
       deliveryPath: {
         type: 'string',
         description: 'Path within the delivery bucket (optional)',
       },
+      webhookUrl: {
+        type: 'string',
+        description: 'URL to receive webhook notifications about order status (optional)',
+      },
     },
-    required: ['archiveId'],
+    required: ['archiveId', 'location', 'deliveryDriver', 'deliveryBucket'],
   },
 };
 
@@ -100,6 +114,9 @@ async function placeArchiveOrderHandler(args: Record<string, unknown>): Promise<
   const { apiKey } = result;
 
   const archiveId = args.archiveId as string | undefined;
+  const locationInput = args.location as string | undefined;
+  const deliveryDriver = args.deliveryDriver as 'S3' | 'GS' | 'AZURE' | undefined;
+  const deliveryBucket = args.deliveryBucket as string | undefined;
 
   if (!archiveId || archiveId.trim() === '') {
     return {
@@ -119,21 +136,76 @@ async function placeArchiveOrderHandler(args: Record<string, unknown>): Promise<
     };
   }
 
+  if (!locationInput) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            error: 'INVALID_REQUEST',
+            message: 'Location is required',
+          }),
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  if (!deliveryDriver) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            error: 'INVALID_REQUEST',
+            message: 'Delivery driver is required (S3, GS, or AZURE)',
+          }),
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  if (!deliveryBucket || deliveryBucket.trim() === '') {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            error: 'INVALID_REQUEST',
+            message: 'Delivery bucket is required',
+          }),
+        },
+      ],
+      isError: true,
+    };
+  }
+
   try {
     const client = createSkyFiClient({ apiKey });
 
+    // Parse location to WKT
+    const aoi = parseLocationToWKT(locationInput);
+
     const orderRequest: PlaceArchiveOrderRequest = {
+      aoi,
       archiveId,
+      deliveryDriver,
+      deliveryParams: {
+        bucket: deliveryBucket,
+      },
     };
 
-    // Add delivery config if provided
-    const deliveryBucket = args.deliveryBucket as string | undefined;
+    // Add optional delivery path
     const deliveryPath = args.deliveryPath as string | undefined;
+    if (deliveryPath) {
+      orderRequest.deliveryParams.path = deliveryPath;
+    }
 
-    if (deliveryBucket || deliveryPath) {
-      orderRequest.deliveryConfig = {};
-      if (deliveryBucket) orderRequest.deliveryConfig.bucket = deliveryBucket;
-      if (deliveryPath) orderRequest.deliveryConfig.path = deliveryPath;
+    // Add optional webhook URL
+    const webhookUrl = args.webhookUrl as string | undefined;
+    if (webhookUrl) {
+      orderRequest.webhook_url = webhookUrl;
     }
 
     const order: Order = await client.placeArchiveOrder(orderRequest);
@@ -141,7 +213,7 @@ async function placeArchiveOrderHandler(args: Record<string, unknown>): Promise<
     const formattedResponse = {
       success: true,
       order: {
-        id: order.orderId || order.id,
+        id: order.id,
         status: order.status,
         type: 'archive',
         archiveId: order.archiveId,
@@ -149,7 +221,7 @@ async function placeArchiveOrderHandler(args: Record<string, unknown>): Promise<
         currency: order.currency,
         createdAt: order.createdAt,
         estimatedDelivery: order.estimatedDelivery,
-        message: `Archive order ${order.orderId || order.id} has been placed successfully`,
+        message: `Archive order ${order.id} has been placed successfully`,
       },
     };
 
@@ -210,17 +282,21 @@ const placeTaskingOrderDefinition = {
         type: 'string',
         description: 'Location as coordinates "lat,lng", GeoJSON string, or WKT POLYGON',
       },
-      dateFrom: {
+      windowStart: {
         type: 'string',
         description: 'Start date for capture window in ISO 8601 format',
       },
-      dateTo: {
+      windowEnd: {
         type: 'string',
         description: 'End date for capture window in ISO 8601 format',
       },
+      productType: {
+        type: 'string',
+        description: 'Product type for the imagery',
+      },
       resolution: {
-        type: 'number',
-        description: 'Desired resolution in meters (optional)',
+        type: 'string',
+        description: 'Desired resolution (e.g., "0.5m", "1m")',
       },
       cloudCoverMax: {
         type: 'number',
@@ -230,21 +306,33 @@ const placeTaskingOrderDefinition = {
         type: 'number',
         description: 'Maximum off-nadir angle in degrees (optional)',
       },
-      priority: {
+      priorityItem: {
         type: 'string',
-        enum: ['standard', 'priority', 'urgent'],
-        description: 'Order priority level (default: standard)',
+        description: 'Priority item identifier (optional)',
+      },
+      deliveryDriver: {
+        type: 'string',
+        enum: ['S3', 'GS', 'AZURE'],
+        description: 'Cloud storage provider for delivery (S3, GS, or AZURE)',
       },
       deliveryBucket: {
         type: 'string',
-        description: 'S3 bucket for delivery (optional)',
+        description: 'Bucket name for delivery',
       },
       deliveryPath: {
         type: 'string',
         description: 'Path within the delivery bucket (optional)',
       },
+      webhookUrl: {
+        type: 'string',
+        description: 'URL to receive webhook notifications about order status (optional)',
+      },
+      requiredProvider: {
+        type: 'string',
+        description: 'Specific provider to use for tasking (optional)',
+      },
     },
-    required: ['location', 'dateFrom', 'dateTo'],
+    required: ['location', 'windowStart', 'windowEnd', 'productType', 'resolution', 'deliveryDriver', 'deliveryBucket'],
   },
 };
 
@@ -254,8 +342,12 @@ async function placeTaskingOrderHandler(args: Record<string, unknown>): Promise<
   const { apiKey } = result;
 
   const locationInput = args.location as string | undefined;
-  const dateFrom = args.dateFrom as string | undefined;
-  const dateTo = args.dateTo as string | undefined;
+  const windowStart = args.windowStart as string | undefined;
+  const windowEnd = args.windowEnd as string | undefined;
+  const productType = args.productType as string | undefined;
+  const resolution = args.resolution as string | undefined;
+  const deliveryDriver = args.deliveryDriver as 'S3' | 'GS' | 'AZURE' | undefined;
+  const deliveryBucket = args.deliveryBucket as string | undefined;
 
   if (!locationInput) {
     return {
@@ -272,14 +364,74 @@ async function placeTaskingOrderHandler(args: Record<string, unknown>): Promise<
     };
   }
 
-  if (!dateFrom || !dateTo) {
+  if (!windowStart || !windowEnd) {
     return {
       content: [
         {
           type: 'text',
           text: JSON.stringify({
             error: 'INVALID_REQUEST',
-            message: 'Both dateFrom and dateTo are required',
+            message: 'Both windowStart and windowEnd are required',
+          }),
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  if (!productType) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            error: 'INVALID_REQUEST',
+            message: 'Product type is required',
+          }),
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  if (!resolution) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            error: 'INVALID_REQUEST',
+            message: 'Resolution is required',
+          }),
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  if (!deliveryDriver) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            error: 'INVALID_REQUEST',
+            message: 'Delivery driver is required (S3, GS, or AZURE)',
+          }),
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  if (!deliveryBucket || deliveryBucket.trim() === '') {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            error: 'INVALID_REQUEST',
+            message: 'Delivery bucket is required',
           }),
         },
       ],
@@ -295,32 +447,37 @@ async function placeTaskingOrderHandler(args: Record<string, unknown>): Promise<
 
     const orderRequest: PlaceTaskingOrderRequest = {
       aoi,
-      dateFrom,
-      dateTo,
+      windowStart,
+      windowEnd,
+      productType,
+      resolution,
+      deliveryDriver,
+      deliveryParams: {
+        bucket: deliveryBucket,
+      },
     };
 
-    // Add optional parameters
-    if (args.resolution !== undefined) {
-      orderRequest.resolution = args.resolution as number;
+    // Add optional delivery path
+    const deliveryPath = args.deliveryPath as string | undefined;
+    if (deliveryPath) {
+      orderRequest.deliveryParams.path = deliveryPath;
     }
+
+    // Add optional parameters
     if (args.cloudCoverMax !== undefined) {
-      orderRequest.cloudCoverMax = args.cloudCoverMax as number;
+      orderRequest.maxCloudCoveragePercent = args.cloudCoverMax as number;
     }
     if (args.offNadirMax !== undefined) {
-      orderRequest.offNadirMax = args.offNadirMax as number;
+      orderRequest.maxOffNadirAngle = args.offNadirMax as number;
     }
-    if (args.priority) {
-      orderRequest.priority = args.priority as 'standard' | 'priority' | 'urgent';
+    if (args.priorityItem) {
+      orderRequest.priorityItem = args.priorityItem as string;
     }
-
-    // Add delivery config if provided
-    const deliveryBucket = args.deliveryBucket as string | undefined;
-    const deliveryPath = args.deliveryPath as string | undefined;
-
-    if (deliveryBucket || deliveryPath) {
-      orderRequest.deliveryConfig = {};
-      if (deliveryBucket) orderRequest.deliveryConfig.bucket = deliveryBucket;
-      if (deliveryPath) orderRequest.deliveryConfig.path = deliveryPath;
+    if (args.webhookUrl) {
+      orderRequest.webhookUrl = args.webhookUrl as string;
+    }
+    if (args.requiredProvider) {
+      orderRequest.requiredProvider = args.requiredProvider as string;
     }
 
     const order: Order = await client.placeTaskingOrder(orderRequest);
@@ -328,14 +485,14 @@ async function placeTaskingOrderHandler(args: Record<string, unknown>): Promise<
     const formattedResponse = {
       success: true,
       order: {
-        id: order.orderId || order.id,
+        id: order.id,
         status: order.status,
         type: 'tasking',
         price: order.price,
         currency: order.currency,
         createdAt: order.createdAt,
         estimatedDelivery: order.estimatedDelivery,
-        message: `Tasking order ${order.orderId || order.id} has been placed successfully`,
+        message: `Tasking order ${order.id} has been placed successfully`,
       },
     };
 
@@ -430,9 +587,9 @@ async function getOrderStatusHandler(args: Record<string, unknown>): Promise<MCP
     const formattedResponse = {
       success: true,
       order: {
-        id: order.orderId || order.id,
+        id: order.id,
         status: order.status,
-        type: order.type,
+        type: order.orderType,
         price: order.price,
         currency: order.currency,
         createdAt: order.createdAt,
@@ -504,13 +661,8 @@ const listOrdersDefinition = {
       },
       type: {
         type: 'string',
-        enum: ['archive', 'tasking'],
-        description: 'Filter orders by type',
-      },
-      status: {
-        type: 'string',
-        enum: ['pending', 'processing', 'completed', 'failed', 'cancelled', 'delivered'],
-        description: 'Filter orders by status',
+        enum: ['ARCHIVE', 'TASKING'],
+        description: 'Filter orders by type (ARCHIVE or TASKING)',
       },
     },
   },
@@ -524,18 +676,10 @@ async function listOrdersHandler(args: Record<string, unknown>): Promise<MCPTool
   try {
     const client = createSkyFiClient({ apiKey });
 
-    const request: {
-      limit?: number;
-      offset?: number;
-      type?: 'archive' | 'tasking';
-      status?: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'delivered';
-    } = {};
+    const request: ListOrdersRequest = {};
 
-    if (args.limit !== undefined) request.limit = args.limit as number;
-    if (args.offset !== undefined) request.offset = args.offset as number;
-    if (args.type !== undefined) request.type = args.type as 'archive' | 'tasking';
-    if (args.status !== undefined) {
-      request.status = args.status as 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'delivered';
+    if (args.type !== undefined) {
+      request.type = args.type as 'ARCHIVE' | 'TASKING';
     }
 
     const response = await client.listOrders(request);
@@ -543,9 +687,9 @@ async function listOrdersHandler(args: Record<string, unknown>): Promise<MCPTool
     const formattedResponse = {
       success: true,
       orders: response.orders.map((order) => ({
-        id: order.orderId || order.id,
+        id: order.id,
         status: order.status,
-        type: order.type,
+        type: order.orderType,
         price: order.price,
         currency: order.currency,
         createdAt: order.createdAt,

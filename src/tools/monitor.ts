@@ -94,21 +94,17 @@ const createMonitorDefinition = {
         type: 'string',
         description: 'URL to receive webhook notifications when new imagery is available',
       },
-      name: {
+      gsdMin: {
+        type: 'number',
+        description: 'Minimum ground sample distance in meters (optional)',
+      },
+      gsdMax: {
+        type: 'number',
+        description: 'Maximum ground sample distance in meters (optional)',
+      },
+      productType: {
         type: 'string',
-        description: 'Optional name for the monitor',
-      },
-      resolutionMax: {
-        type: 'number',
-        description: 'Maximum resolution in meters to filter for',
-      },
-      cloudCoverMax: {
-        type: 'number',
-        description: 'Maximum cloud coverage percentage (0-100)',
-      },
-      offNadirMax: {
-        type: 'number',
-        description: 'Maximum off-nadir angle in degrees',
+        description: 'Product type filter for the monitor (optional)',
       },
     },
     required: ['location', 'webhookUrl'],
@@ -187,21 +183,19 @@ async function createMonitorHandler(
       webhookUrl,
     };
 
-    // Add optional name
-    if (args.name) {
-      request.name = args.name as string;
+    // Add optional filters
+    const gsdMin = args.gsdMin as number | undefined;
+    const gsdMax = args.gsdMax as number | undefined;
+    const productType = args.productType as string | undefined;
+
+    if (gsdMin !== undefined) {
+      request.gsdMin = gsdMin;
     }
-
-    // Add filters if provided
-    const resolutionMax = args.resolutionMax as number | undefined;
-    const cloudCoverMax = args.cloudCoverMax as number | undefined;
-    const offNadirMax = args.offNadirMax as number | undefined;
-
-    if (resolutionMax !== undefined || cloudCoverMax !== undefined || offNadirMax !== undefined) {
-      request.filters = {};
-      if (resolutionMax !== undefined) request.filters.resolutionMax = resolutionMax;
-      if (cloudCoverMax !== undefined) request.filters.cloudCoverMax = cloudCoverMax;
-      if (offNadirMax !== undefined) request.filters.offNadirMax = offNadirMax;
+    if (gsdMax !== undefined) {
+      request.gsdMax = gsdMax;
+    }
+    if (productType) {
+      request.productType = productType;
     }
 
     const monitor: Monitor = await client.createMonitor(request);
@@ -209,14 +203,15 @@ async function createMonitorHandler(
     const formattedResponse = {
       success: true,
       monitor: {
-        id: monitor.notificationId || monitor.id,
+        id: monitor.id,
         status: monitor.status,
-        name: monitor.name,
         aoi: monitor.aoi,
-        filters: monitor.filters,
+        gsdMin: monitor.gsdMin,
+        gsdMax: monitor.gsdMax,
+        productType: monitor.productType,
         webhookUrl: monitor.webhookUrl,
         createdAt: monitor.createdAt,
-        message: `Monitor ${monitor.notificationId || monitor.id} created successfully`,
+        message: `Monitor ${monitor.id} created successfully`,
       },
     };
 
@@ -286,12 +281,13 @@ async function listMonitorsHandler(
 
     const formattedResponse = {
       success: true,
-      monitors: response.monitors.map((monitor) => ({
-        id: monitor.notificationId || monitor.id,
+      monitors: response.notifications.map((monitor) => ({
+        id: monitor.id,
         status: monitor.status,
-        name: monitor.name,
         aoi: monitor.aoi,
-        filters: monitor.filters,
+        gsdMin: monitor.gsdMin,
+        gsdMax: monitor.gsdMax,
+        productType: monitor.productType,
         webhookUrl: monitor.webhookUrl,
         createdAt: monitor.createdAt,
         lastTriggered: monitor.lastTriggered,
@@ -389,11 +385,12 @@ async function getMonitorHandler(
     const formattedResponse = {
       success: true,
       monitor: {
-        id: monitor.notificationId || monitor.id,
+        id: monitor.id,
         status: monitor.status,
-        name: monitor.name,
         aoi: monitor.aoi,
-        filters: monitor.filters,
+        gsdMin: monitor.gsdMin,
+        gsdMax: monitor.gsdMax,
+        productType: monitor.productType,
         webhookUrl: monitor.webhookUrl,
         createdAt: monitor.createdAt,
         lastTriggered: monitor.lastTriggered,

@@ -66,26 +66,16 @@ function parseLocationToWKT(location: string | Record<string, unknown>): string 
 const getPricingEstimateDefinition = {
   name: 'get_pricing_estimate',
   description:
-    'Calculate pricing estimate for satellite imagery based on area of interest and desired resolutions/products.',
+    'Get pricing information for satellite imagery based on area of interest. Returns a pricing matrix for available products and resolutions.',
   inputSchema: {
     type: 'object',
     properties: {
       location: {
         type: 'string',
-        description: 'Location as coordinates "lat,lng", GeoJSON string, or WKT POLYGON',
-      },
-      products: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'List of product types to get pricing for (optional)',
-      },
-      resolutions: {
-        type: 'array',
-        items: { type: 'number' },
-        description: 'List of resolution values in meters to get pricing for (optional)',
+        description: 'Location as coordinates "lat,lng", GeoJSON string, or WKT POLYGON (optional)',
       },
     },
-    required: ['location'],
+    required: [],
   },
 };
 
@@ -110,53 +100,24 @@ async function getPricingEstimateHandler(
 
   const locationInput = args.location as string | undefined;
 
-  if (!locationInput) {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            error: 'INVALID_REQUEST',
-            message: 'Location is required',
-          }),
-        },
-      ],
-      isError: true,
-    };
-  }
-
   try {
     const client = createSkyFiClient({ apiKey });
 
-    // Parse location to WKT
-    const aoi = parseLocationToWKT(locationInput);
-
     // Build the pricing request
-    const pricingRequest: PricingRequest = {
-      aoi,
-    };
+    const pricingRequest: PricingRequest = {};
 
-    if (args.products) {
-      pricingRequest.products = args.products as string[];
-    }
-
-    if (args.resolutions) {
-      pricingRequest.resolutions = args.resolutions as number[];
+    // Add optional AOI
+    if (locationInput) {
+      pricingRequest.aoi = parseLocationToWKT(locationInput);
     }
 
     const response: PricingResponse = await client.getPricing(pricingRequest);
 
-    // Format the response
+    // Format the response - return the full productTypes matrix
     const formattedResponse = {
       success: true,
       pricing: {
-        price: response.price,
-        currency: response.currency,
-        provider: response.provider,
-        estimatedDelivery: response.estimatedDelivery,
-        minimumAoi: response.minimumAoi,
-        breakdown: response.breakdown,
-        priceMatrix: response.priceMatrix,
+        productTypes: response.productTypes,
       },
     };
 
@@ -214,17 +175,21 @@ const checkOrderFeasibilityDefinition = {
         type: 'string',
         description: 'Location as coordinates "lat,lng", GeoJSON string, or WKT POLYGON',
       },
-      dateFrom: {
+      fromDate: {
         type: 'string',
-        description: 'Start date for feasibility check in ISO 8601 format',
+        description: 'Start date for feasibility check in ISO 8601 format (optional)',
       },
-      dateTo: {
+      toDate: {
         type: 'string',
-        description: 'End date for feasibility check in ISO 8601 format',
+        description: 'End date for feasibility check in ISO 8601 format (optional)',
+      },
+      productType: {
+        type: 'string',
+        description: 'Product type for feasibility check (optional)',
       },
       resolution: {
-        type: 'number',
-        description: 'Desired resolution in meters',
+        type: 'string',
+        description: 'Desired resolution (e.g., "0.5m", "1m") (optional)',
       },
     },
     required: ['location'],
@@ -278,16 +243,20 @@ async function checkOrderFeasibilityHandler(
       aoi,
     };
 
-    if (args.dateFrom) {
-      feasibilityRequest.dateFrom = args.dateFrom as string;
+    if (args.fromDate) {
+      feasibilityRequest.fromDate = args.fromDate as string;
     }
 
-    if (args.dateTo) {
-      feasibilityRequest.dateTo = args.dateTo as string;
+    if (args.toDate) {
+      feasibilityRequest.toDate = args.toDate as string;
+    }
+
+    if (args.productType) {
+      feasibilityRequest.productType = args.productType as string;
     }
 
     if (args.resolution) {
-      feasibilityRequest.resolution = args.resolution as number;
+      feasibilityRequest.resolution = args.resolution as string;
     }
 
     const response: FeasibilityResponse = await client.checkFeasibility(feasibilityRequest);

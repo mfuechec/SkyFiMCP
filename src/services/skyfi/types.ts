@@ -20,88 +20,82 @@ export type GeoJSON = GeoJSONPoint | GeoJSONPolygon;
 // Image types
 export type ImageType = 'optical' | 'sar' | 'multispectral' | 'hyperspectral';
 
-// Search request - uses WKT format for AOI
+// ==================== Archive Search ====================
+
+// Search request - matches /archives POST
 export interface SearchArchiveRequest {
   aoi: string; // WKT POLYGON format
-  dateFrom?: string;
-  dateTo?: string;
-  resolutionFrom?: number;
-  resolutionTo?: number;
-  cloudCoverFrom?: number;
-  cloudCoverTo?: number;
-  offNadirFrom?: number;
-  offNadirTo?: number;
-  sunElevationFrom?: number;
-  sunElevationTo?: number;
-  openDataOnly?: boolean;
+  fromDate?: string; // ISO 8601 format
+  toDate?: string; // ISO 8601 format
+  maxCloudCoveragePercent?: number;
+  maxOffNadirAngle?: number;
+  resolutions?: string[];
+  productTypes?: string[];
+  providers?: string[];
+  openData?: boolean;
   pageSize?: number;
-  cursor?: string;
 }
 
-// Archive image result from search
+// Archive result from search
 export interface ArchiveResult {
-  id: string;
   archiveId: string;
   provider: string;
-  captureDate: string;
-  resolution: number;
-  cloudCover?: number;
-  offNadir?: number;
-  sunElevation?: number;
-  preview?: string;
-  thumbnail?: string;
-  aoi: string; // WKT format
-  aoiArea?: number;
-  metadata?: Record<string, unknown>;
+  constellation?: string;
+  productType: string;
+  platformResolution?: number;
+  resolution: string;
+  captureTimestamp: string;
+  cloudCoveragePercent?: number;
+  offNadirAngle?: number;
+  footprint: string; // WKT format
+  minSquareKms?: number;
+  maxSquareKms?: number;
+  priceForOneSquareKm?: number;
+  deliveryTimeHours?: number;
+  thumbnailUrls?: {
+    small?: string;
+    medium?: string;
+    large?: string;
+  };
+  gsd?: number;
 }
 
 // Search response
 export interface SearchArchiveResponse {
-  results: ArchiveResult[];
+  archives: ArchiveResult[];
   total: number;
-  cursor?: string;
-  hasMore: boolean;
+  nextPage?: string;
 }
 
-// Pricing request
+// ==================== Pricing ====================
+
+// Pricing request - matches /pricing POST
 export interface PricingRequest {
-  aoi: string; // WKT POLYGON format
-  products?: string[];
-  resolutions?: number[];
+  aoi?: string; // WKT POLYGON format
 }
 
 // Pricing response
 export interface PricingResponse {
-  price: number;
-  currency: string;
-  breakdown?: {
-    basePrice: number;
-    processingFee?: number;
-    deliveryFee?: number;
-  };
-  minimumAoi?: number;
-  provider: string;
-  estimatedDelivery?: string;
-  priceMatrix?: Array<{
-    product: string;
-    resolution: number;
-    price: number;
-    currency: string;
-  }>;
+  productTypes: Record<string, unknown>;
+  // Full product/provider matrix with pricing details
 }
 
-// Feasibility request
+// ==================== Feasibility ====================
+
+// Feasibility request - matches /feasibility POST
 export interface FeasibilityRequest {
   aoi: string; // WKT POLYGON format
-  dateFrom?: string;
-  dateTo?: string;
-  resolution?: number;
+  fromDate?: string;
+  toDate?: string;
+  productType?: string;
+  resolution?: string;
 }
 
-// Feasibility check response
+// Feasibility response
 export interface FeasibilityResponse {
-  feasible: boolean;
   feasibilityId?: string;
+  status?: string;
+  feasible?: boolean;
   reason?: string;
   alternatives?: string[];
   passPredictions?: Array<{
@@ -111,129 +105,112 @@ export interface FeasibilityResponse {
   }>;
 }
 
-// Tasking request (for new imagery capture)
-export interface TaskingRequest {
-  aoi: string; // WKT POLYGON format
-  dateFrom: string;
-  dateTo: string;
-  resolution?: number;
-  cloudCoverMax?: number;
-  offNadirMax?: number;
-  priority?: 'standard' | 'priority' | 'urgent';
-}
+// ==================== Orders ====================
 
-// Archive order request
+// Archive order request - matches /order-archive POST
 export interface PlaceArchiveOrderRequest {
+  aoi: string; // WKT POLYGON format
   archiveId: string;
-  deliveryConfig?: {
-    bucket?: string;
+  deliveryDriver: 'S3' | 'GS' | 'AZURE';
+  deliveryParams: {
+    bucket: string;
+    credentials?: Record<string, string>;
     path?: string;
   };
+  metadata?: Record<string, unknown>;
+  webhook_url?: string;
 }
 
-// Tasking order request
+// Tasking order request - matches /order-tasking POST
 export interface PlaceTaskingOrderRequest {
   aoi: string; // WKT POLYGON format
-  dateFrom: string;
-  dateTo: string;
-  resolution?: number;
-  cloudCoverMax?: number;
-  offNadirMax?: number;
-  priority?: 'standard' | 'priority' | 'urgent';
-  deliveryConfig?: {
-    bucket?: string;
+  windowStart: string; // ISO 8601
+  windowEnd: string; // ISO 8601
+  productType: string;
+  resolution: string;
+  priorityItem?: string;
+  maxCloudCoveragePercent?: number;
+  maxOffNadirAngle?: number;
+  deliveryDriver: 'S3' | 'GS' | 'AZURE';
+  deliveryParams: {
+    bucket: string;
+    credentials?: Record<string, string>;
     path?: string;
   };
-}
-
-// Legacy interface for backwards compatibility
-export interface PlaceOrderRequest {
-  imageId?: string;
-  archiveId?: string;
-  taskingRequest?: TaskingRequest;
-  deliveryOptions?: {
-    cloudStorage?: string;
-    format?: string;
-  };
-  userConfirmationToken?: string;
+  metadata?: Record<string, unknown>;
+  webhookUrl?: string;
+  requiredProvider?: string;
+  provider_window_id?: string;
 }
 
 // Order status
-export type OrderStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled' | 'delivered';
+export type OrderStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'DELIVERED';
 
 // Order response
 export interface Order {
   id: string;
-  orderId: string;
+  orderType: 'ARCHIVE' | 'TASKING';
+  ownerId?: string;
   status: OrderStatus;
-  type: 'archive' | 'tasking';
-  archiveId?: string;
   aoi?: string;
+  archiveId?: string;
+  deliveryDriver?: string;
+  deliveryParams?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  createdAt?: string;
+  updatedAt?: string;
   price?: number;
   currency?: string;
-  createdAt: string;
-  updatedAt: string;
   estimatedDelivery?: string;
-  deliverables?: Array<{
-    type: string;
-    url?: string;
-    status: string;
-  }>;
-  errorMessage?: string;
   progress?: number;
+  deliverables?: string[];
+  errorMessage?: string;
 }
 
 // Order list request
 export interface ListOrdersRequest {
-  limit?: number;
-  offset?: number;
-  type?: 'archive' | 'tasking';
-  status?: OrderStatus;
+  type?: 'ARCHIVE' | 'TASKING';
 }
 
 // Order list response
 export interface ListOrdersResponse {
   orders: Order[];
-  total: number;
-  hasMore: boolean;
+  total?: number;
+  hasMore?: boolean;
 }
 
-// Notification/Monitor request (API calls them "notifications")
+// ==================== Notifications/Monitors ====================
+
+// Notification request - matches /notifications POST
 export interface CreateMonitorRequest {
   aoi: string; // WKT POLYGON format
-  filters?: {
-    resolutionMax?: number;
-    cloudCoverMax?: number;
-    offNadirMax?: number;
-  };
+  gsdMin?: number;
+  gsdMax?: number;
+  productType?: string;
   webhookUrl: string;
-  name?: string;
 }
 
-// Monitor/Notification response
+// Notification/Monitor response
 export interface Monitor {
   id: string;
-  notificationId: string;
   status: 'active' | 'paused' | 'deleted';
   aoi: string; // WKT format
-  filters?: {
-    resolutionMax?: number;
-    cloudCoverMax?: number;
-    offNadirMax?: number;
-  };
+  gsdMin?: number;
+  gsdMax?: number;
+  productType?: string;
   webhookUrl: string;
-  name?: string;
-  createdAt: string;
+  createdAt?: string;
   lastTriggered?: string;
   triggerCount?: number;
 }
 
 // List monitors response
 export interface ListMonitorsResponse {
-  monitors: Monitor[];
-  total: number;
-  hasMore?: boolean;
+  notifications: Monitor[];
+  total?: number;
 }
+
+// ==================== API Error ====================
 
 // API error response
 export interface SkyFiApiError {
