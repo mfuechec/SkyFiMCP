@@ -77,10 +77,15 @@ export class SkyFiClient {
       },
     });
 
-    // Add request interceptor for authentication
+    // Add request interceptor for authentication and logging
     this.client.interceptors.request.use(
       (config: InternalAxiosRequestConfig) => {
         config.headers['X-Skyfi-Api-Key'] = this.config.apiKey;
+        // Log request for debugging
+        console.log(`[SkyFi API] ${config.method?.toUpperCase()} ${config.url}`);
+        if (config.data) {
+          console.log(`[SkyFi API] Request body:`, JSON.stringify(config.data, null, 2));
+        }
         return config;
       }
     );
@@ -100,6 +105,8 @@ export class SkyFiClient {
   private handleError(error: AxiosError<SkyFiApiError>): never {
     if (error.response) {
       const { status, data } = error.response;
+      // Log error for debugging
+      console.log(`[SkyFi API] Error ${status}:`, JSON.stringify(data, null, 2));
       throw new SkyFiApiException(
         data?.code || 'API_ERROR',
         data?.message || error.message,
@@ -107,12 +114,14 @@ export class SkyFiClient {
         data?.details
       );
     } else if (error.request) {
+      console.log(`[SkyFi API] Network error: Unable to reach API`);
       throw new SkyFiApiException(
         'NETWORK_ERROR',
         'Network error: Unable to reach SkyFi API',
         0
       );
     } else {
+      console.log(`[SkyFi API] Request error:`, error.message);
       throw new SkyFiApiException(
         'REQUEST_ERROR',
         error.message,
