@@ -13,6 +13,28 @@ import type {
   ImageType,
 } from '../services/skyfi/types.js';
 
+// Helper to get API key from environment
+function getApiKeyOrError(): { apiKey: string } | { error: MCPToolCallResponse } {
+  const apiKey = process.env.SKYFI_API_KEY;
+  if (!apiKey) {
+    return {
+      error: {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              error: 'CONFIGURATION_ERROR',
+              message: 'SKYFI_API_KEY environment variable is not set on the server',
+            }),
+          },
+        ],
+        isError: true,
+      },
+    };
+  }
+  return { apiKey };
+}
+
 // ==================== Place Order Tool ====================
 
 const placeOrderDefinition = {
@@ -22,10 +44,6 @@ const placeOrderDefinition = {
   inputSchema: {
     type: 'object',
     properties: {
-      apiKey: {
-        type: 'string',
-        description: 'SkyFi API key for authentication',
-      },
       userConfirmationToken: {
         type: 'string',
         description:
@@ -87,13 +105,16 @@ const placeOrderDefinition = {
         },
       },
     },
-    required: ['apiKey', 'userConfirmationToken'],
+    required: ['userConfirmationToken'],
     oneOf: [{ required: ['imageId'] }, { required: ['taskingRequest'] }],
   },
 };
 
 async function placeOrderHandler(args: Record<string, unknown>): Promise<MCPToolCallResponse> {
-  const apiKey = args.apiKey as string;
+  const result = getApiKeyOrError();
+  if ('error' in result) return result.error;
+  const { apiKey } = result;
+
   const userConfirmationToken = args.userConfirmationToken as string | undefined;
   const imageId = args.imageId as string | undefined;
   const taskingRequestInput = args.taskingRequest as Record<string, unknown> | undefined;
@@ -274,21 +295,20 @@ const getOrderStatusDefinition = {
   inputSchema: {
     type: 'object',
     properties: {
-      apiKey: {
-        type: 'string',
-        description: 'SkyFi API key for authentication',
-      },
       orderId: {
         type: 'string',
         description: 'ID of the order to check status for',
       },
     },
-    required: ['apiKey', 'orderId'],
+    required: ['orderId'],
   },
 };
 
 async function getOrderStatusHandler(args: Record<string, unknown>): Promise<MCPToolCallResponse> {
-  const apiKey = args.apiKey as string;
+  const result = getApiKeyOrError();
+  if ('error' in result) return result.error;
+  const { apiKey } = result;
+
   const orderId = args.orderId as string;
 
   if (!orderId || orderId.trim() === '') {
@@ -381,21 +401,20 @@ const cancelOrderDefinition = {
   inputSchema: {
     type: 'object',
     properties: {
-      apiKey: {
-        type: 'string',
-        description: 'SkyFi API key for authentication',
-      },
       orderId: {
         type: 'string',
         description: 'ID of the order to cancel',
       },
     },
-    required: ['apiKey', 'orderId'],
+    required: ['orderId'],
   },
 };
 
 async function cancelOrderHandler(args: Record<string, unknown>): Promise<MCPToolCallResponse> {
-  const apiKey = args.apiKey as string;
+  const result = getApiKeyOrError();
+  if ('error' in result) return result.error;
+  const { apiKey } = result;
+
   const orderId = args.orderId as string;
 
   if (!orderId || orderId.trim() === '') {
@@ -482,10 +501,6 @@ const listOrdersDefinition = {
   inputSchema: {
     type: 'object',
     properties: {
-      apiKey: {
-        type: 'string',
-        description: 'SkyFi API key for authentication',
-      },
       limit: {
         type: 'number',
         description: 'Maximum number of orders to return (default: 20)',
@@ -514,12 +529,13 @@ const listOrdersDefinition = {
         },
       },
     },
-    required: ['apiKey'],
   },
 };
 
 async function listOrdersHandler(args: Record<string, unknown>): Promise<MCPToolCallResponse> {
-  const apiKey = args.apiKey as string;
+  const result = getApiKeyOrError();
+  if ('error' in result) return result.error;
+  const { apiKey } = result;
   const limit = args.limit as number | undefined;
   const offset = args.offset as number | undefined;
   const status = args.status as string | undefined;
@@ -607,10 +623,6 @@ const pollOrderStatusDefinition = {
   inputSchema: {
     type: 'object',
     properties: {
-      apiKey: {
-        type: 'string',
-        description: 'SkyFi API key for authentication',
-      },
       orderId: {
         type: 'string',
         description: 'ID of the order to poll',
@@ -624,14 +636,17 @@ const pollOrderStatusDefinition = {
         description: 'Seconds between polling attempts (default: 30)',
       },
     },
-    required: ['apiKey', 'orderId'],
+    required: ['orderId'],
   },
 };
 
 async function pollOrderStatusHandler(
   args: Record<string, unknown>
 ): Promise<MCPToolCallResponse> {
-  const apiKey = args.apiKey as string;
+  const result = getApiKeyOrError();
+  if ('error' in result) return result.error;
+  const { apiKey } = result;
+
   const orderId = args.orderId as string;
   const maxAttempts = args.maxAttempts !== undefined ? (args.maxAttempts as number) : 10;
   const intervalSeconds = args.intervalSeconds !== undefined ? (args.intervalSeconds as number) : 30;

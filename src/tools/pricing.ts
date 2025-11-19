@@ -23,10 +23,6 @@ const getPricingEstimateDefinition = {
   inputSchema: {
     type: 'object',
     properties: {
-      apiKey: {
-        type: 'string',
-        description: 'SkyFi API key for authentication',
-      },
       imageId: {
         type: 'string',
         description: 'ID of existing archive imagery to get pricing for',
@@ -68,7 +64,6 @@ const getPricingEstimateDefinition = {
         required: ['location', 'resolution'],
       },
     },
-    required: ['apiKey'],
     oneOf: [
       { required: ['imageId'] },
       { required: ['taskingRequest'] },
@@ -79,7 +74,22 @@ const getPricingEstimateDefinition = {
 async function getPricingEstimateHandler(
   args: Record<string, unknown>
 ): Promise<MCPToolCallResponse> {
-  const apiKey = args.apiKey as string;
+  const apiKey = process.env.SKYFI_API_KEY;
+  if (!apiKey) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            error: 'CONFIGURATION_ERROR',
+            message: 'SKYFI_API_KEY environment variable is not set on the server',
+          }),
+        },
+      ],
+      isError: true,
+    };
+  }
+
   const imageId = args.imageId as string | undefined;
   const taskingRequestInput = args.taskingRequest as Record<string, unknown> | undefined;
 
@@ -212,10 +222,6 @@ const checkOrderFeasibilityDefinition = {
   inputSchema: {
     type: 'object',
     properties: {
-      apiKey: {
-        type: 'string',
-        description: 'SkyFi API key for authentication',
-      },
       imageId: {
         type: 'string',
         description: 'ID of existing archive imagery to check feasibility for',
@@ -257,7 +263,6 @@ const checkOrderFeasibilityDefinition = {
         required: ['location', 'resolution'],
       },
     },
-    required: ['apiKey'],
     oneOf: [
       { required: ['imageId'] },
       { required: ['taskingRequest'] },
@@ -268,7 +273,22 @@ const checkOrderFeasibilityDefinition = {
 async function checkOrderFeasibilityHandler(
   args: Record<string, unknown>
 ): Promise<MCPToolCallResponse> {
-  const apiKey = args.apiKey as string;
+  const apiKey = process.env.SKYFI_API_KEY;
+  if (!apiKey) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            error: 'CONFIGURATION_ERROR',
+            message: 'SKYFI_API_KEY environment variable is not set on the server',
+          }),
+        },
+      ],
+      isError: true,
+    };
+  }
+
   const imageId = args.imageId as string | undefined;
   const taskingRequestInput = args.taskingRequest as Record<string, unknown> | undefined;
 

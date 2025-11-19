@@ -12,6 +12,28 @@ import type {
   ImageType,
 } from '../services/skyfi/types.js';
 
+// Helper to get API key from environment
+function getApiKeyOrError(): { apiKey: string } | { error: MCPToolCallResponse } {
+  const apiKey = process.env.SKYFI_API_KEY;
+  if (!apiKey) {
+    return {
+      error: {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              error: 'CONFIGURATION_ERROR',
+              message: 'SKYFI_API_KEY environment variable is not set on the server',
+            }),
+          },
+        ],
+        isError: true,
+      },
+    };
+  }
+  return { apiKey };
+}
+
 // ==================== Create Monitor Tool ====================
 
 const createMonitorDefinition = {
@@ -21,10 +43,6 @@ const createMonitorDefinition = {
   inputSchema: {
     type: 'object',
     properties: {
-      apiKey: {
-        type: 'string',
-        description: 'SkyFi API key for authentication',
-      },
       location: {
         type: 'object',
         description: 'GeoJSON Point or Polygon for the area to monitor',
@@ -67,14 +85,17 @@ const createMonitorDefinition = {
         description: 'Send notification when pricing changes (default: false)',
       },
     },
-    required: ['apiKey', 'location', 'webhookUrl'],
+    required: ['location', 'webhookUrl'],
   },
 };
 
 async function createMonitorHandler(
   args: Record<string, unknown>
 ): Promise<MCPToolCallResponse> {
-  const apiKey = args.apiKey as string;
+  const result = getApiKeyOrError();
+  if ('error' in result) return result.error;
+  const { apiKey } = result;
+
   const locationInput = args.location as Record<string, unknown>;
   const webhookUrl = args.webhookUrl as string;
   const resolution = args.resolution as string | undefined;
@@ -238,19 +259,17 @@ const listMonitorsDefinition = {
   inputSchema: {
     type: 'object',
     properties: {
-      apiKey: {
-        type: 'string',
-        description: 'SkyFi API key for authentication',
-      },
     },
-    required: ['apiKey'],
+    required: [],
   },
 };
 
 async function listMonitorsHandler(
-  args: Record<string, unknown>
+  _args: Record<string, unknown>
 ): Promise<MCPToolCallResponse> {
-  const apiKey = args.apiKey as string;
+  const result = getApiKeyOrError();
+  if ('error' in result) return result.error;
+  const { apiKey } = result;
 
   try {
     const client = createSkyFiClient({ apiKey });
@@ -319,23 +338,22 @@ const getMonitorDefinition = {
   inputSchema: {
     type: 'object',
     properties: {
-      apiKey: {
-        type: 'string',
-        description: 'SkyFi API key for authentication',
-      },
       monitorId: {
         type: 'string',
         description: 'ID of the monitor to retrieve',
       },
     },
-    required: ['apiKey', 'monitorId'],
+    required: ['monitorId'],
   },
 };
 
 async function getMonitorHandler(
   args: Record<string, unknown>
 ): Promise<MCPToolCallResponse> {
-  const apiKey = args.apiKey as string;
+  const result = getApiKeyOrError();
+  if ('error' in result) return result.error;
+  const { apiKey } = result;
+
   const monitorId = args.monitorId as string;
 
   if (!monitorId || monitorId.trim() === '') {
@@ -419,23 +437,22 @@ const deleteMonitorDefinition = {
   inputSchema: {
     type: 'object',
     properties: {
-      apiKey: {
-        type: 'string',
-        description: 'SkyFi API key for authentication',
-      },
       monitorId: {
         type: 'string',
         description: 'ID of the monitor to delete',
       },
     },
-    required: ['apiKey', 'monitorId'],
+    required: ['monitorId'],
   },
 };
 
 async function deleteMonitorHandler(
   args: Record<string, unknown>
 ): Promise<MCPToolCallResponse> {
-  const apiKey = args.apiKey as string;
+  const result = getApiKeyOrError();
+  if ('error' in result) return result.error;
+  const { apiKey } = result;
+
   const monitorId = args.monitorId as string;
 
   if (!monitorId || monitorId.trim() === '') {
@@ -511,23 +528,22 @@ const pauseMonitorDefinition = {
   inputSchema: {
     type: 'object',
     properties: {
-      apiKey: {
-        type: 'string',
-        description: 'SkyFi API key for authentication',
-      },
       monitorId: {
         type: 'string',
         description: 'ID of the monitor to pause',
       },
     },
-    required: ['apiKey', 'monitorId'],
+    required: ['monitorId'],
   },
 };
 
 async function pauseMonitorHandler(
   args: Record<string, unknown>
 ): Promise<MCPToolCallResponse> {
-  const apiKey = args.apiKey as string;
+  const result = getApiKeyOrError();
+  if ('error' in result) return result.error;
+  const { apiKey } = result;
+
   const monitorId = args.monitorId as string;
 
   if (!monitorId || monitorId.trim() === '') {
@@ -607,23 +623,22 @@ const resumeMonitorDefinition = {
   inputSchema: {
     type: 'object',
     properties: {
-      apiKey: {
-        type: 'string',
-        description: 'SkyFi API key for authentication',
-      },
       monitorId: {
         type: 'string',
         description: 'ID of the monitor to resume',
       },
     },
-    required: ['apiKey', 'monitorId'],
+    required: ['monitorId'],
   },
 };
 
 async function resumeMonitorHandler(
   args: Record<string, unknown>
 ): Promise<MCPToolCallResponse> {
-  const apiKey = args.apiKey as string;
+  const result = getApiKeyOrError();
+  if ('error' in result) return result.error;
+  const { apiKey } = result;
+
   const monitorId = args.monitorId as string;
 
   if (!monitorId || monitorId.trim() === '') {
