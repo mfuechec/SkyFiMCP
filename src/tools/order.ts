@@ -301,8 +301,12 @@ Location format (REQUIRED):
 
 Do NOT use place names - you must provide numeric coordinates.
 
-Date format: YYYY-MM-DD (e.g., "2024-01-15")
-Resolution format: string with unit (e.g., "0.5m", "1m", "2m")
+Date format: ISO 8601 with timezone (e.g., "2025-01-15T00:00:00+00:00")
+
+Resolution must be one of: LOW, MEDIUM, HIGH, VERY HIGH, SUPER HIGH, ULTRA HIGH, CM 30, CM 50
+
+Product types: DAY, NIGHT, VIDEO, SAR, HYPERSPECTRAL, MULTISPECTRAL, STEREO
+
 Delivery drivers: S3 (AWS), GS (Google Cloud), AZURE (Azure Blob)`,
   inputSchema: {
     type: 'object',
@@ -313,19 +317,21 @@ Delivery drivers: S3 (AWS), GS (Google Cloud), AZURE (Azure Blob)`,
       },
       windowStart: {
         type: 'string',
-        description: 'REQUIRED. Capture window start in YYYY-MM-DD format (e.g., "2024-01-15")',
+        description: 'REQUIRED. Capture window start in ISO 8601 format with timezone (e.g., "2025-01-15T00:00:00+00:00")',
       },
       windowEnd: {
         type: 'string',
-        description: 'REQUIRED. Capture window end in YYYY-MM-DD format (e.g., "2024-02-15")',
+        description: 'REQUIRED. Capture window end in ISO 8601 format with timezone (e.g., "2025-02-15T00:00:00+00:00")',
       },
       productType: {
         type: 'string',
-        description: 'REQUIRED. Product type (e.g., "OPTICAL", "SAR")',
+        enum: ['DAY', 'NIGHT', 'VIDEO', 'SAR', 'HYPERSPECTRAL', 'MULTISPECTRAL', 'STEREO'],
+        description: 'REQUIRED. Product type: DAY, NIGHT, VIDEO, SAR, HYPERSPECTRAL, MULTISPECTRAL, or STEREO',
       },
       resolution: {
         type: 'string',
-        description: 'REQUIRED. Resolution with unit (e.g., "0.5m", "1m", "2m")',
+        enum: ['LOW', 'MEDIUM', 'HIGH', 'VERY HIGH', 'SUPER HIGH', 'ULTRA HIGH', 'CM 30', 'CM 50'],
+        description: 'REQUIRED. Resolution level: LOW, MEDIUM, HIGH, VERY HIGH, SUPER HIGH, ULTRA HIGH, CM 30, or CM 50',
       },
       deliveryDriver: {
         type: 'string',
@@ -336,12 +342,12 @@ Delivery drivers: S3 (AWS), GS (Google Cloud), AZURE (Azure Blob)`,
         type: 'string',
         description: 'REQUIRED. Your bucket name (e.g., "my-imagery-bucket")',
       },
-      cloudCoverMax: {
-        type: 'number',
+      maxCloudCoveragePercent: {
+        type: 'integer',
         description: 'Max cloud coverage 0-100 (e.g., 20 for max 20% clouds)',
       },
-      offNadirMax: {
-        type: 'number',
+      maxOffNadirAngle: {
+        type: 'integer',
         description: 'Max off-nadir angle 0-90 degrees (e.g., 30)',
       },
       deliveryPath: {
@@ -354,7 +360,8 @@ Delivery drivers: S3 (AWS), GS (Google Cloud), AZURE (Azure Blob)`,
       },
       requiredProvider: {
         type: 'string',
-        description: 'Specific provider (e.g., "MAXAR", "PLANET")',
+        enum: ['PLANET', 'UMBRA'],
+        description: 'Specific provider: PLANET or UMBRA',
       },
     },
     required: ['location', 'windowStart', 'windowEnd', 'productType', 'resolution', 'deliveryDriver', 'deliveryBucket'],
@@ -489,11 +496,11 @@ async function placeTaskingOrderHandler(args: Record<string, unknown>): Promise<
     }
 
     // Add optional parameters
-    if (args.cloudCoverMax !== undefined) {
-      orderRequest.maxCloudCoveragePercent = args.cloudCoverMax as number;
+    if (args.maxCloudCoveragePercent !== undefined) {
+      orderRequest.maxCloudCoveragePercent = args.maxCloudCoveragePercent as number;
     }
-    if (args.offNadirMax !== undefined) {
-      orderRequest.maxOffNadirAngle = args.offNadirMax as number;
+    if (args.maxOffNadirAngle !== undefined) {
+      orderRequest.maxOffNadirAngle = args.maxOffNadirAngle as number;
     }
     if (args.priorityItem) {
       orderRequest.priorityItem = args.priorityItem as string;

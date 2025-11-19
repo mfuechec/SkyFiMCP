@@ -20,6 +20,15 @@ export type GeoJSON = GeoJSONPoint | GeoJSONPolygon;
 // Image types
 export type ImageType = 'optical' | 'sar' | 'multispectral' | 'hyperspectral';
 
+// Resolution enum (from OpenAPI spec)
+export type ResolutionEnum = 'LOW' | 'MEDIUM' | 'HIGH' | 'VERY HIGH' | 'SUPER HIGH' | 'ULTRA HIGH' | 'CM 30' | 'CM 50';
+
+// Product type enum (from OpenAPI spec)
+export type ProductTypeEnum = 'DAY' | 'NIGHT' | 'VIDEO' | 'SAR' | 'HYPERSPECTRAL' | 'MULTISPECTRAL' | 'STEREO';
+
+// Provider enum (from OpenAPI spec)
+export type ProviderEnum = 'PLANET' | 'UMBRA';
+
 // ==================== Archive Search ====================
 
 // Search request - matches /archives POST
@@ -84,11 +93,14 @@ export interface PricingResponse {
 
 // Feasibility request - matches /feasibility POST
 export interface FeasibilityRequest {
-  aoi: string; // WKT POLYGON format
-  startDate?: string;
-  endDate?: string;
-  productType?: string;
-  resolution?: number;
+  aoi: string; // WKT POLYGON format - REQUIRED
+  productType: string; // REQUIRED - DAY, NIGHT, VIDEO, SAR, HYPERSPECTRAL, MULTISPECTRAL, STEREO
+  resolution: string[]; // REQUIRED - Array of: MEDIUM, HIGH, VERY_HIGH
+  startDate: string; // REQUIRED - ISO 8601 with timezone
+  endDate: string; // REQUIRED - ISO 8601 with timezone
+  maxCloudCoveragePercent?: number;
+  priorityItem?: boolean;
+  requiredProvider?: string; // PLANET or UMBRA
 }
 
 // Feasibility response
@@ -123,23 +135,23 @@ export interface PlaceArchiveOrderRequest {
 
 // Tasking order request - matches /order-tasking POST
 export interface PlaceTaskingOrderRequest {
-  aoi: string; // WKT POLYGON format
-  windowStart: string; // ISO 8601
-  windowEnd: string; // ISO 8601
-  productType: string;
-  resolution: string;
-  priorityItem?: string;
-  maxCloudCoveragePercent?: number;
-  maxOffNadirAngle?: number;
-  deliveryDriver: 'S3' | 'GS' | 'AZURE';
+  aoi: string; // WKT POLYGON format - REQUIRED
+  windowStart: string; // ISO 8601 with timezone - REQUIRED
+  windowEnd: string; // ISO 8601 with timezone - REQUIRED
+  productType: string; // REQUIRED - DAY, NIGHT, VIDEO, SAR, HYPERSPECTRAL, MULTISPECTRAL, STEREO
+  resolution: string; // REQUIRED - LOW, MEDIUM, HIGH, VERY HIGH, SUPER HIGH, ULTRA HIGH, CM 30, CM 50
+  deliveryDriver: 'S3' | 'GS' | 'AZURE'; // REQUIRED
   deliveryParams: {
     bucket: string;
     credentials?: Record<string, string>;
     path?: string;
   };
+  priorityItem?: string;
+  maxCloudCoveragePercent?: number;
+  maxOffNadirAngle?: number;
   metadata?: Record<string, unknown>;
   webhookUrl?: string;
-  requiredProvider?: string;
+  requiredProvider?: string; // PLANET or UMBRA
   provider_window_id?: string;
 }
 

@@ -99,7 +99,9 @@ Location format (REQUIRED):
 
 Do NOT use place names - you must provide numeric coordinates.
 
-GSD (Ground Sample Distance) is resolution in meters. Lower GSD = higher resolution imagery.`,
+GSD (Ground Sample Distance) is resolution in meters. Lower GSD = higher resolution imagery.
+
+Product types: DAY, NIGHT, VIDEO, SAR, HYPERSPECTRAL, MULTISPECTRAL, STEREO`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -112,16 +114,17 @@ GSD (Ground Sample Distance) is resolution in meters. Lower GSD = higher resolut
         description: 'REQUIRED. URL to receive notifications (e.g., "https://myapi.com/webhooks/skyfi")',
       },
       gsdMin: {
-        type: 'number',
-        description: 'Min resolution in meters (e.g., 0.3 for 30cm)',
+        type: 'integer',
+        description: 'Min resolution in meters (e.g., 1 for 1m)',
       },
       gsdMax: {
-        type: 'number',
-        description: 'Max resolution in meters (e.g., 1.0 for 1m)',
+        type: 'integer',
+        description: 'Max resolution in meters (e.g., 5 for 5m)',
       },
       productType: {
         type: 'string',
-        description: 'Product type filter (e.g., "OPTICAL", "SAR")',
+        enum: ['DAY', 'NIGHT', 'VIDEO', 'SAR', 'HYPERSPECTRAL', 'MULTISPECTRAL', 'STEREO'],
+        description: 'Product type filter: DAY, NIGHT, VIDEO, SAR, HYPERSPECTRAL, MULTISPECTRAL, or STEREO',
       },
     },
     required: ['location', 'webhookUrl'],

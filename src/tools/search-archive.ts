@@ -16,7 +16,7 @@ import type {
 } from '../services/skyfi/types.js';
 import { geoJSONToWKT } from '../services/skyfi/types.js';
 
-// Tool definition with comprehensive parameter schema
+// Tool definition with comprehensive parameter schema based on OpenAPI spec
 const searchArchiveToolDefinition = {
   name: 'search_archive',
   description: `Search the SkyFi satellite imagery archive for existing imagery.
@@ -28,7 +28,9 @@ IMPORTANT: Location must be in one of these formats:
 
 Do NOT use place names like "San Francisco" - you must provide numeric coordinates.
 
-Date format: YYYY-MM-DD (e.g., "2024-01-15")
+Date format: ISO 8601 datetime with timezone (e.g., "2024-01-15T00:00:00+00:00")
+
+Resolutions: LOW, MEDIUM, HIGH, VERY HIGH, SUPER HIGH, ULTRA HIGH, CM 30, CM 50
 
 Returns archive imagery with archiveId that can be used for ordering.`,
   inputSchema: {
@@ -38,38 +40,49 @@ Returns archive imagery with archiveId that can be used for ordering.`,
         type: 'string',
         description: 'REQUIRED. Coordinates as "lat,lng" (e.g., "37.7749,-122.4194"), GeoJSON string, or WKT POLYGON. Do NOT use place names.',
       },
-      startDate: {
+      fromDate: {
         type: 'string',
-        description: 'Start date in YYYY-MM-DD format (e.g., "2024-01-01")',
+        description: 'Start date in ISO 8601 format with timezone (e.g., "2024-01-01T00:00:00+00:00")',
       },
-      endDate: {
+      toDate: {
         type: 'string',
-        description: 'End date in YYYY-MM-DD format (e.g., "2024-12-31")',
+        description: 'End date in ISO 8601 format with timezone (e.g., "2024-12-31T23:59:59+00:00")',
+      },
+      resolutions: {
+        type: 'array',
+        items: {
+          type: 'string',
+          enum: ['LOW', 'MEDIUM', 'HIGH', 'VERY HIGH', 'SUPER HIGH', 'ULTRA HIGH', 'CM 30', 'CM 50']
+        },
+        description: 'Filter by resolution levels: LOW, MEDIUM, HIGH, VERY HIGH, SUPER HIGH, ULTRA HIGH, CM 30, CM 50',
+      },
+      productTypes: {
+        type: 'array',
+        items: {
+          type: 'string',
+          enum: ['DAY', 'NIGHT', 'VIDEO', 'SAR', 'HYPERSPECTRAL', 'MULTISPECTRAL', 'STEREO']
+        },
+        description: 'Filter by product types: DAY, NIGHT, VIDEO, SAR, HYPERSPECTRAL, MULTISPECTRAL, STEREO',
       },
       providers: {
         type: 'array',
         items: { type: 'string' },
         description: 'Filter by providers (e.g., ["MAXAR", "PLANET", "AIRBUS"])',
       },
-      productTypes: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Filter by product types',
-      },
-      cloudCoverMax: {
-        type: 'number',
+      maxCloudCoveragePercent: {
+        type: 'integer',
         description: 'Maximum cloud coverage percentage, 0-100 (e.g., 20 for max 20% clouds)',
       },
-      offNadirMax: {
-        type: 'number',
+      maxOffNadirAngle: {
+        type: 'integer',
         description: 'Maximum off-nadir angle in degrees, 0-90 (e.g., 30)',
       },
-      openDataOnly: {
+      openData: {
         type: 'boolean',
         description: 'If true, only return free/open data imagery',
       },
-      limit: {
-        type: 'number',
+      pageSize: {
+        type: 'integer',
         description: 'Max results to return (1-100, default 10)',
       },
     },
@@ -212,54 +225,28 @@ async function searchArchiveHandler(
       aoi,
     };
 
-    // Add optional date range
-    const startDate = args.startDate as string | undefined;
-    const endDate = args.endDate as string | undefined;
+    // Add optional date range (API uses fromDate/toDate)
+    const fromDate = args.fromDate as string | undefined;
+    const toDate = args.toDate as string | undefined;
 
-    if (startDate) {
-      try {
-        validateDate(startDate, 'startDate');
-        searchRequest.fromDate = startDate;
-      } catch (error) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Error: ${(error as Error).message}`,
-            },
-          ],
-          isError: true,
-        };
-      }
+    if (fromDate) {
+      searchRequest.fromDate = fromDate;
     }
 
-    if (endDate) {
-      try {
-        validateDate(endDate, 'endDate');
-        searchRequest.toDate = endDate;
-      } catch (error) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Error: ${(error as Error).message}`,
-            },
-          ],
-          isError: true,
-        };
-      }
+    if (toDate) {
+      searchRequest.toDate = toDate;
     }
 
     // Validate date range
-    if (startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
+    if (fromDate && toDate) {
+      const start = new Date(fromDate);
+      const end = new Date(toDate);
       if (start > end) {
         return {
           content: [
             {
               type: 'text',
-              text: `Error: Start date (${startDate}) must be before or equal to end date (${endDate}).`,
+              text: `Error: fromDate (${fromDate}) must be before or equal to toDate (${toDate}).`,
             },
           ],
           isError: true,
@@ -268,37 +255,43 @@ async function searchArchiveHandler(
     }
 
     // Add optional cloud cover
-    const cloudCoverMax = args.cloudCoverMax as number | undefined;
-    if (cloudCoverMax !== undefined) {
-      if (cloudCoverMax < 0 || cloudCoverMax > 100) {
+    const maxCloudCoveragePercent = args.maxCloudCoveragePercent as number | undefined;
+    if (maxCloudCoveragePercent !== undefined) {
+      if (maxCloudCoveragePercent < 0 || maxCloudCoveragePercent > 100) {
         return {
           content: [
             {
               type: 'text',
-              text: `Error: Invalid cloudCoverMax "${cloudCoverMax}". Must be between 0 and 100.`,
+              text: `Error: Invalid maxCloudCoveragePercent "${maxCloudCoveragePercent}". Must be between 0 and 100.`,
             },
           ],
           isError: true,
         };
       }
-      searchRequest.maxCloudCoveragePercent = cloudCoverMax;
+      searchRequest.maxCloudCoveragePercent = maxCloudCoveragePercent;
     }
 
     // Add optional off-nadir
-    const offNadirMax = args.offNadirMax as number | undefined;
-    if (offNadirMax !== undefined) {
-      if (offNadirMax < 0 || offNadirMax > 90) {
+    const maxOffNadirAngle = args.maxOffNadirAngle as number | undefined;
+    if (maxOffNadirAngle !== undefined) {
+      if (maxOffNadirAngle < 0 || maxOffNadirAngle > 90) {
         return {
           content: [
             {
               type: 'text',
-              text: `Error: Invalid offNadirMax "${offNadirMax}". Must be between 0 and 90.`,
+              text: `Error: Invalid maxOffNadirAngle "${maxOffNadirAngle}". Must be between 0 and 90.`,
             },
           ],
           isError: true,
         };
       }
-      searchRequest.maxOffNadirAngle = offNadirMax;
+      searchRequest.maxOffNadirAngle = maxOffNadirAngle;
+    }
+
+    // Add optional resolutions
+    const resolutions = args.resolutions as string[] | undefined;
+    if (resolutions && resolutions.length > 0) {
+      searchRequest.resolutions = resolutions;
     }
 
     // Add optional providers
@@ -314,26 +307,26 @@ async function searchArchiveHandler(
     }
 
     // Add optional openData flag
-    const openDataOnly = args.openDataOnly as boolean | undefined;
-    if (openDataOnly !== undefined) {
-      searchRequest.openData = openDataOnly;
+    const openData = args.openData as boolean | undefined;
+    if (openData !== undefined) {
+      searchRequest.openData = openData;
     }
 
-    // Add optional limit (pageSize)
-    const limit = args.limit as number | undefined;
-    if (limit !== undefined) {
-      if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    // Add optional pageSize
+    const pageSize = args.pageSize as number | undefined;
+    if (pageSize !== undefined) {
+      if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) {
         return {
           content: [
             {
               type: 'text',
-              text: `Error: Invalid limit "${limit}". Must be an integer between 1 and 100.`,
+              text: `Error: Invalid pageSize "${pageSize}". Must be an integer between 1 and 100.`,
             },
           ],
           isError: true,
         };
       }
-      searchRequest.pageSize = limit;
+      searchRequest.pageSize = pageSize;
     } else {
       searchRequest.pageSize = 10; // Default limit
     }
@@ -348,7 +341,7 @@ async function searchArchiveHandler(
         content: [
           {
             type: 'text',
-            text: `No imagery found for the specified search criteria.\n\nSearch parameters:\n- Location: ${locationArg}${startDate ? `\n- Start date: ${startDate}` : ''}${endDate ? `\n- End date: ${endDate}` : ''}${cloudCoverMax ? `\n- Max cloud cover: ${cloudCoverMax}%` : ''}${openDataOnly ? `\n- Open data only: yes` : ''}\n\nTry adjusting your search parameters or expanding the date range.`,
+            text: `No imagery found for the specified search criteria.\n\nSearch parameters:\n- Location: ${locationArg}${fromDate ? `\n- From date: ${fromDate}` : ''}${toDate ? `\n- To date: ${toDate}` : ''}${maxCloudCoveragePercent ? `\n- Max cloud cover: ${maxCloudCoveragePercent}%` : ''}${openData ? `\n- Open data only: yes` : ''}\n\nTry adjusting your search parameters or expanding the date range.`,
           },
         ],
       };

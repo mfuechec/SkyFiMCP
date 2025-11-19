@@ -18,6 +18,67 @@ import { geoJSONToWKT } from '../services/skyfi/types.js';
 // ==================== Helper Functions ====================
 
 /**
+ * Convert numeric resolution to API string enum array
+ * Returns an array with appropriate resolution levels based on input
+ */
+function convertResolutionToEnumArray(resolution: string | number): string[] {
+  // Valid resolution enum values (with underscores as per API spec)
+  const validEnums = ['MEDIUM', 'HIGH', 'VERY_HIGH'];
+
+  // If already a valid string enum, return as array
+  if (typeof resolution === 'string') {
+    // Normalize: replace spaces with underscores and uppercase
+    const normalized = resolution.toUpperCase().replace(/\s+/g, '_');
+    if (validEnums.includes(normalized)) {
+      return [normalized];
+    }
+    // Try to parse as number
+    const num = parseFloat(resolution);
+    if (!isNaN(num)) {
+      resolution = num;
+    } else {
+      throw new Error(`Invalid resolution: "${resolution}". Must be numeric (0.5, 1, 2, 5) or one of: ${validEnums.join(', ')}`);
+    }
+  }
+
+  // Convert numeric to appropriate resolution levels
+  // Return array with resolutions that can achieve the requested GSD
+  if (typeof resolution === 'number') {
+    if (resolution <= 1) {
+      // High resolution request - include all levels that could work
+      return ['VERY_HIGH'];
+    } else if (resolution <= 3) {
+      return ['VERY_HIGH', 'HIGH'];
+    } else if (resolution <= 5) {
+      return ['HIGH', 'MEDIUM'];
+    } else {
+      return ['MEDIUM'];
+    }
+  }
+
+  throw new Error(`Invalid resolution type: ${typeof resolution}`);
+}
+
+/**
+ * Convert date to ISO 8601 format with timezone
+ */
+function convertDateToISO(date: string): string {
+  // If already has timezone info, return as-is
+  if (date.includes('+') || date.includes('Z')) {
+    return date;
+  }
+
+  // Parse the date and add timezone
+  const parsed = new Date(date);
+  if (isNaN(parsed.getTime())) {
+    throw new Error(`Invalid date: "${date}"`);
+  }
+
+  // Return in ISO format with UTC timezone
+  return parsed.toISOString().replace('.000Z', '+00:00');
+}
+
+/**
  * Parse location input to WKT format
  */
 function parseLocationToWKT(location: string | Record<string, unknown>): string {
@@ -183,44 +244,52 @@ const checkOrderFeasibilityDefinition = {
   name: 'check_order_feasibility',
   description: `Check if a satellite imagery tasking order is feasible for a given location and time window.
 
-IMPORTANT - Location format (REQUIRED):
-- Coordinates: "37.7749,-122.4194" (latitude,longitude as decimal degrees)
-- GeoJSON: '{"type":"Point","coordinates":[-122.4194,37.7749]}' (longitude first!)
-- WKT POLYGON: "POLYGON((-122.42 37.77, -122.41 37.77, -122.41 37.78, -122.42 37.78, -122.42 37.77))"
+ALL PARAMETERS ARE REQUIRED.
 
-Do NOT use place names like "San Francisco" - you must provide numeric coordinates.
+Location format:
+- Coordinates: "37.7749,-122.4194" (latitude,longitude)
+- GeoJSON or WKT POLYGON also accepted
 
-Date format: YYYY-MM-DD (e.g., "2024-01-15")
-Resolution: number in meters (e.g., 0.5, 1, 2) - NO "m" suffix!
-Product types: DAY, NIGHT, VIDEO, SAR, HYPERSPECTRAL, MULTISPECTRAL, STEREO
+Resolution: Can be numeric (0.5, 1, 2, 5) or string (MEDIUM, HIGH, VERY_HIGH) - will be auto-converted.
 
-Returns feasibility status, satellite pass predictions, and alternatives if not feasible.`,
+Dates: Any format accepted (2025-01-15, 2025-01-15T00:00:00Z, etc.) - will be auto-converted.
+
+Product types: DAY, NIGHT, VIDEO, SAR, HYPERSPECTRAL, MULTISPECTRAL, STEREO`,
   inputSchema: {
     type: 'object',
     properties: {
       location: {
         type: 'string',
-        description: 'REQUIRED. Coordinates as "lat,lng" (e.g., "37.7749,-122.4194"), GeoJSON string, or WKT POLYGON. Do NOT use place names.',
-      },
-      startDate: {
-        type: 'string',
-        description: 'REQUIRED. Start date in YYYY-MM-DD format (e.g., "2024-01-15")',
-      },
-      endDate: {
-        type: 'string',
-        description: 'REQUIRED. End date in YYYY-MM-DD format (e.g., "2024-02-15")',
+        description: 'REQUIRED. Coordinates as "lat,lng" (e.g., "37.7749,-122.4194"), GeoJSON string, or WKT POLYGON.',
       },
       productType: {
         type: 'string',
         enum: ['DAY', 'NIGHT', 'VIDEO', 'SAR', 'HYPERSPECTRAL', 'MULTISPECTRAL', 'STEREO'],
-        description: 'Product type: DAY, NIGHT, VIDEO, SAR, HYPERSPECTRAL, MULTISPECTRAL, or STEREO',
+        description: 'REQUIRED. Product type: DAY, NIGHT, VIDEO, SAR, HYPERSPECTRAL, MULTISPECTRAL, or STEREO',
       },
       resolution: {
-        type: 'number',
-        description: 'Resolution in meters as a number (e.g., 0.5, 1, 2) - do NOT include "m" suffix',
+        type: ['string', 'number'],
+        description: 'REQUIRED. Resolution - numeric (0.5, 1, 2, 5) or string (MEDIUM, HIGH, VERY_HIGH)',
+      },
+      startDate: {
+        type: 'string',
+        description: 'REQUIRED. Start date (e.g., "2025-01-15" or "2025-01-15T00:00:00Z")',
+      },
+      endDate: {
+        type: 'string',
+        description: 'REQUIRED. End date (e.g., "2025-02-15" or "2025-02-15T00:00:00Z")',
+      },
+      maxCloudCoveragePercent: {
+        type: 'integer',
+        description: 'Maximum acceptable cloud coverage percentage (0-100)',
+      },
+      requiredProvider: {
+        type: 'string',
+        enum: ['PLANET', 'UMBRA'],
+        description: 'Specific provider to use: PLANET or UMBRA',
       },
     },
-    required: ['location', 'startDate', 'endDate'],
+    required: ['location', 'productType', 'resolution', 'startDate', 'endDate'],
   },
 };
 
@@ -260,31 +329,101 @@ async function checkOrderFeasibilityHandler(
     };
   }
 
+  // Validate all required fields
+  const productType = args.productType as string | undefined;
+  const resolutionInput = args.resolution as string | number | undefined;
+  const startDateInput = args.startDate as string | undefined;
+  const endDateInput = args.endDate as string | undefined;
+
+  if (!productType) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            error: 'INVALID_REQUEST',
+            message: 'productType is required. Must be one of: DAY, NIGHT, VIDEO, SAR, HYPERSPECTRAL, MULTISPECTRAL, STEREO',
+          }),
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  if (resolutionInput === undefined) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            error: 'INVALID_REQUEST',
+            message: 'resolution is required. Can be numeric (0.3, 0.5, 1, 2, 5) or string (HIGH, VERY HIGH, etc.)',
+          }),
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  if (!startDateInput) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            error: 'INVALID_REQUEST',
+            message: 'startDate is required',
+          }),
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  if (!endDateInput) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            error: 'INVALID_REQUEST',
+            message: 'endDate is required',
+          }),
+        },
+      ],
+      isError: true,
+    };
+  }
+
   try {
     const client = createSkyFiClient({ apiKey });
 
     // Parse location to WKT
     const aoi = parseLocationToWKT(locationInput);
 
-    // Build the feasibility request
+    // Convert resolution to API enum array format
+    const resolution = convertResolutionToEnumArray(resolutionInput);
+
+    // Convert dates to ISO 8601 with timezone
+    const startDate = convertDateToISO(startDateInput);
+    const endDate = convertDateToISO(endDateInput);
+
+    // Build the feasibility request with all required fields
     const feasibilityRequest: FeasibilityRequest = {
       aoi,
+      productType,
+      resolution,
+      startDate,
+      endDate,
     };
 
-    if (args.startDate) {
-      feasibilityRequest.startDate = args.startDate as string;
+    // Add optional fields
+    if (args.maxCloudCoveragePercent !== undefined) {
+      feasibilityRequest.maxCloudCoveragePercent = args.maxCloudCoveragePercent as number;
     }
 
-    if (args.endDate) {
-      feasibilityRequest.endDate = args.endDate as string;
-    }
-
-    if (args.productType) {
-      feasibilityRequest.productType = args.productType as string;
-    }
-
-    if (args.resolution !== undefined) {
-      feasibilityRequest.resolution = args.resolution as number;
+    if (args.requiredProvider) {
+      feasibilityRequest.requiredProvider = args.requiredProvider as string;
     }
 
     const response: FeasibilityResponse = await client.checkFeasibility(feasibilityRequest);
