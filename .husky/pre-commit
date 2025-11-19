@@ -1,0 +1,13 @@
+# Check for secrets using gitleaks
+if command -v gitleaks &> /dev/null; then
+    gitleaks git --staged --verbose
+    if [ $? -ne 0 ]; then
+        echo ""
+        echo "❌ Secrets detected! Commit blocked."
+        echo "Please remove the secrets before committing."
+        exit 1
+    fi
+else
+    echo "⚠️  gitleaks not installed. Skipping secret scan."
+    echo "   Install with: brew install gitleaks"
+fi
