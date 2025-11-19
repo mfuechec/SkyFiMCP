@@ -11,10 +11,10 @@ import {
 } from '../services/skyfi/client.js';
 import type {
   SearchArchiveRequest,
-  ImageType,
   GeoJSON,
   GeoJSONPoint,
 } from '../services/skyfi/types.js';
+import { geoJSONToWKT } from '../services/skyfi/types.js';
 
 // Tool definition with comprehensive parameter schema
 const searchArchiveToolDefinition = {
@@ -27,7 +27,7 @@ const searchArchiveToolDefinition = {
       location: {
         type: 'string',
         description:
-          'Location to search. Can be a place name (e.g., "San Francisco, CA"), coordinates as "lat,lng" (e.g., "37.7749,-122.4194"), or GeoJSON object as a JSON string.',
+          'Location to search. Can be coordinates as "lat,lng" (e.g., "37.7749,-122.4194"), GeoJSON object as a JSON string, or WKT POLYGON format.',
       },
       startDate: {
         type: 'string',
@@ -39,16 +39,25 @@ const searchArchiveToolDefinition = {
         description:
           'End date for imagery search in ISO 8601 format (e.g., "2024-12-31"). Optional.',
       },
-      resolution: {
-        type: 'string',
+      resolutionMin: {
+        type: 'number',
         description:
-          'Minimum resolution in meters (e.g., "0.5" for 50cm resolution). Optional.',
+          'Minimum resolution in meters (e.g., 0.5 for 50cm resolution). Optional.',
       },
-      imageType: {
-        type: 'string',
-        enum: ['optical', 'sar', 'multispectral', 'hyperspectral'],
+      resolutionMax: {
+        type: 'number',
         description:
-          'Type of imagery to search for. Options: optical, sar, multispectral, hyperspectral. Optional.',
+          'Maximum resolution in meters. Optional.',
+      },
+      cloudCoverMax: {
+        type: 'number',
+        description:
+          'Maximum cloud coverage percentage (0-100). Optional.',
+      },
+      offNadirMax: {
+        type: 'number',
+        description:
+          'Maximum off-nadir angle in degrees. Optional.',
       },
       openDataOnly: {
         type: 'boolean',
@@ -86,8 +95,13 @@ function resetSkyFiClient(): void {
   skyfiClient = null;
 }
 
-// Parse location string to appropriate format
-function parseLocation(location: string): string | GeoJSON {
+// Parse location string to WKT format
+function parseLocationToWKT(location: string): string {
+  // Check if it's already WKT format
+  if (location.toUpperCase().startsWith('POLYGON')) {
+    return location;
+  }
+
   // Check if it's a coordinate string (lat,lng)
   const coordMatch = location.match(/^(-?\d+\.?\d*),\s*(-?\d+\.?\d*)$/);
   if (coordMatch) {
@@ -104,11 +118,12 @@ function parseLocation(location: string): string | GeoJSON {
       );
     }
 
-    // Return as GeoJSON Point
-    return {
+    // Convert to WKT POLYGON (small bounding box around point)
+    const geojson: GeoJSONPoint = {
       type: 'Point',
-      coordinates: [lng, lat], // GeoJSON uses [lng, lat] order
-    } as GeoJSONPoint;
+      coordinates: [lng, lat],
+    };
+    return geoJSONToWKT(geojson);
   }
 
   // Check if it's a GeoJSON string
@@ -116,7 +131,7 @@ function parseLocation(location: string): string | GeoJSON {
     try {
       const geojson = JSON.parse(location);
       if (geojson.type === 'Point' || geojson.type === 'Polygon') {
-        return geojson as GeoJSON;
+        return geoJSONToWKT(geojson as GeoJSON);
       }
       throw new Error(
         `Invalid GeoJSON type: ${geojson.type}. Must be Point or Polygon.`
@@ -129,8 +144,10 @@ function parseLocation(location: string): string | GeoJSON {
     }
   }
 
-  // Return as place name string (API will geocode it)
-  return location;
+  // Cannot geocode place names - require explicit coordinates
+  throw new Error(
+    `Invalid location format: "${location}". Please provide coordinates (lat,lng), GeoJSON, or WKT POLYGON.`
+  );
 }
 
 // Validate date format
@@ -159,17 +176,17 @@ async function searchArchiveHandler(
         content: [
           {
             type: 'text',
-            text: 'Error: Location parameter is required. Please provide a place name, coordinates (lat,lng), or GeoJSON.',
+            text: 'Error: Location parameter is required. Please provide coordinates (lat,lng), GeoJSON, or WKT POLYGON.',
           },
         ],
         isError: true,
       };
     }
 
-    // Parse location
-    let parsedLocation: string | GeoJSON;
+    // Parse location to WKT
+    let aoi: string;
     try {
-      parsedLocation = parseLocation(locationArg.trim());
+      aoi = parseLocationToWKT(locationArg.trim());
     } catch (error) {
       return {
         content: [
@@ -184,103 +201,132 @@ async function searchArchiveHandler(
 
     // Build search request
     const searchRequest: SearchArchiveRequest = {
-      location: parsedLocation,
+      aoi,
     };
 
     // Add optional date range
     const startDate = args.startDate as string | undefined;
     const endDate = args.endDate as string | undefined;
 
-    if (startDate || endDate) {
-      if (startDate) {
-        try {
-          validateDate(startDate, 'startDate');
-        } catch (error) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Error: ${(error as Error).message}`,
-              },
-            ],
-            isError: true,
-          };
-        }
-      }
-
-      if (endDate) {
-        try {
-          validateDate(endDate, 'endDate');
-        } catch (error) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Error: ${(error as Error).message}`,
-              },
-            ],
-            isError: true,
-          };
-        }
-      }
-
-      // Validate date range
-      if (startDate && endDate) {
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        if (start > end) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Error: Start date (${startDate}) must be before or equal to end date (${endDate}).`,
-              },
-            ],
-            isError: true,
-          };
-        }
-      }
-
-      searchRequest.dateRange = {
-        start: startDate || '1900-01-01',
-        end: endDate || new Date().toISOString().split('T')[0],
-      };
-    }
-
-    // Add optional resolution
-    const resolution = args.resolution as string | undefined;
-    if (resolution) {
-      const resNum = parseFloat(resolution);
-      if (isNaN(resNum) || resNum <= 0) {
+    if (startDate) {
+      try {
+        validateDate(startDate, 'startDate');
+        searchRequest.dateFrom = startDate;
+      } catch (error) {
         return {
           content: [
             {
               type: 'text',
-              text: `Error: Invalid resolution "${resolution}". Must be a positive number in meters.`,
+              text: `Error: ${(error as Error).message}`,
             },
           ],
           isError: true,
         };
       }
-      searchRequest.resolution = resolution;
     }
 
-    // Add optional image type
-    const imageType = args.imageType as string | undefined;
-    if (imageType) {
-      const validTypes = ['optical', 'sar', 'multispectral', 'hyperspectral'];
-      if (!validTypes.includes(imageType)) {
+    if (endDate) {
+      try {
+        validateDate(endDate, 'endDate');
+        searchRequest.dateTo = endDate;
+      } catch (error) {
         return {
           content: [
             {
               type: 'text',
-              text: `Error: Invalid imageType "${imageType}". Must be one of: ${validTypes.join(', ')}.`,
+              text: `Error: ${(error as Error).message}`,
             },
           ],
           isError: true,
         };
       }
-      searchRequest.imageType = imageType as ImageType;
+    }
+
+    // Validate date range
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      if (start > end) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: Start date (${startDate}) must be before or equal to end date (${endDate}).`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
+    // Add optional resolution range
+    const resolutionMin = args.resolutionMin as number | undefined;
+    const resolutionMax = args.resolutionMax as number | undefined;
+
+    if (resolutionMin !== undefined) {
+      if (resolutionMin <= 0) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: Invalid resolutionMin "${resolutionMin}". Must be a positive number.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      searchRequest.resolutionFrom = resolutionMin;
+    }
+
+    if (resolutionMax !== undefined) {
+      if (resolutionMax <= 0) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: Invalid resolutionMax "${resolutionMax}". Must be a positive number.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      searchRequest.resolutionTo = resolutionMax;
+    }
+
+    // Add optional cloud cover
+    const cloudCoverMax = args.cloudCoverMax as number | undefined;
+    if (cloudCoverMax !== undefined) {
+      if (cloudCoverMax < 0 || cloudCoverMax > 100) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: Invalid cloudCoverMax "${cloudCoverMax}". Must be between 0 and 100.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      searchRequest.cloudCoverFrom = 0;
+      searchRequest.cloudCoverTo = cloudCoverMax;
+    }
+
+    // Add optional off-nadir
+    const offNadirMax = args.offNadirMax as number | undefined;
+    if (offNadirMax !== undefined) {
+      if (offNadirMax < 0 || offNadirMax > 90) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: Invalid offNadirMax "${offNadirMax}". Must be between 0 and 90.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      searchRequest.offNadirFrom = 0;
+      searchRequest.offNadirTo = offNadirMax;
     }
 
     // Add optional openDataOnly flag
@@ -289,7 +335,7 @@ async function searchArchiveHandler(
       searchRequest.openDataOnly = openDataOnly;
     }
 
-    // Add optional limit
+    // Add optional limit (pageSize)
     const limit = args.limit as number | undefined;
     if (limit !== undefined) {
       if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
@@ -303,9 +349,9 @@ async function searchArchiveHandler(
           isError: true,
         };
       }
-      searchRequest.limit = limit;
+      searchRequest.pageSize = limit;
     } else {
-      searchRequest.limit = 10; // Default limit
+      searchRequest.pageSize = 10; // Default limit
     }
 
     // Get SkyFi client and execute search
@@ -318,7 +364,7 @@ async function searchArchiveHandler(
         content: [
           {
             type: 'text',
-            text: `No imagery found for the specified search criteria.\n\nSearch parameters:\n- Location: ${locationArg}${startDate ? `\n- Start date: ${startDate}` : ''}${endDate ? `\n- End date: ${endDate}` : ''}${resolution ? `\n- Resolution: ${resolution}m` : ''}${imageType ? `\n- Image type: ${imageType}` : ''}${openDataOnly ? `\n- Open data only: yes` : ''}\n\nTry adjusting your search parameters or expanding the date range.`,
+            text: `No imagery found for the specified search criteria.\n\nSearch parameters:\n- Location: ${locationArg}${startDate ? `\n- Start date: ${startDate}` : ''}${endDate ? `\n- End date: ${endDate}` : ''}${resolutionMax ? `\n- Max resolution: ${resolutionMax}m` : ''}${cloudCoverMax ? `\n- Max cloud cover: ${cloudCoverMax}%` : ''}${openDataOnly ? `\n- Open data only: yes` : ''}\n\nTry adjusting your search parameters or expanding the date range.`,
           },
         ],
       };
@@ -328,20 +374,30 @@ async function searchArchiveHandler(
     const resultText = response.results
       .map((img, index) => {
         const lines = [
-          `${index + 1}. Image ID: ${img.id}`,
+          `${index + 1}. Archive ID: ${img.archiveId || img.id}`,
           `   Provider: ${img.provider}`,
           `   Capture Date: ${img.captureDate}`,
-          `   Resolution: ${img.resolution}`,
-          `   Type: ${img.imageType}`,
-          `   Price: ${img.currency} ${img.price.toFixed(2)}`,
+          `   Resolution: ${img.resolution}m`,
         ];
 
-        if (img.cloudCoverage !== undefined) {
-          lines.push(`   Cloud Coverage: ${img.cloudCoverage}%`);
+        if (img.cloudCover !== undefined) {
+          lines.push(`   Cloud Coverage: ${img.cloudCover}%`);
         }
 
-        if (img.previewUrl) {
-          lines.push(`   Preview: ${img.previewUrl}`);
+        if (img.offNadir !== undefined) {
+          lines.push(`   Off-Nadir: ${img.offNadir}°`);
+        }
+
+        if (img.sunElevation !== undefined) {
+          lines.push(`   Sun Elevation: ${img.sunElevation}°`);
+        }
+
+        if (img.preview) {
+          lines.push(`   Preview: ${img.preview}`);
+        }
+
+        if (img.thumbnail) {
+          lines.push(`   Thumbnail: ${img.thumbnail}`);
         }
 
         return lines.join('\n');
@@ -367,7 +423,7 @@ async function searchArchiveHandler(
       switch (error.code) {
         case 'INVALID_LOCATION':
           errorMessage +=
-            '\n\nTip: Make sure the location is a valid place name, coordinates (lat,lng), or GeoJSON.';
+            '\n\nTip: Make sure the location is valid coordinates (lat,lng), GeoJSON, or WKT POLYGON.';
           break;
         case 'AUTH_INVALID':
           errorMessage +=
@@ -420,7 +476,7 @@ export function registerSearchArchiveTool(): void {
 export {
   searchArchiveHandler,
   searchArchiveToolDefinition,
-  parseLocation,
+  parseLocationToWKT,
   validateDate,
   getSkyFiClient,
   resetSkyFiClient,

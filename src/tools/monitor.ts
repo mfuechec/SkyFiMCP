@@ -1,6 +1,6 @@
 /**
  * AOI Monitoring Tools
- * MCP tools for setting up and managing area of interest monitoring
+ * MCP tools for setting up and managing area of interest monitoring (notifications)
  */
 
 import { toolRegistry, type MCPToolCallResponse } from '../mcp/index.js';
@@ -9,8 +9,9 @@ import type {
   CreateMonitorRequest,
   Monitor,
   GeoJSON,
-  ImageType,
+  GeoJSONPoint,
 } from '../services/skyfi/types.js';
+import { geoJSONToWKT } from '../services/skyfi/types.js';
 
 // Helper to get API key from environment
 function getApiKeyOrError(): { apiKey: string } | { error: MCPToolCallResponse } {
@@ -34,55 +35,80 @@ function getApiKeyOrError(): { apiKey: string } | { error: MCPToolCallResponse }
   return { apiKey };
 }
 
+// Helper to parse location to WKT
+function parseLocationToWKT(location: string | Record<string, unknown>): string {
+  // If it's a string, check various formats
+  if (typeof location === 'string') {
+    // Check if already WKT
+    if (location.toUpperCase().startsWith('POLYGON')) {
+      return location;
+    }
+
+    // Check if coordinate string
+    const coordMatch = location.match(/^(-?\d+\.?\d*),\s*(-?\d+\.?\d*)$/);
+    if (coordMatch) {
+      const lat = parseFloat(coordMatch[1]);
+      const lng = parseFloat(coordMatch[2]);
+      const geojson: GeoJSONPoint = {
+        type: 'Point',
+        coordinates: [lng, lat],
+      };
+      return geoJSONToWKT(geojson);
+    }
+
+    // Try parsing as GeoJSON
+    try {
+      const parsed = JSON.parse(location);
+      if (parsed.type === 'Point' || parsed.type === 'Polygon') {
+        return geoJSONToWKT(parsed as GeoJSON);
+      }
+    } catch {
+      // Not JSON
+    }
+
+    throw new Error(`Invalid location format: "${location}"`);
+  }
+
+  // If it's an object, assume it's GeoJSON
+  if (location.type === 'Point' || location.type === 'Polygon') {
+    return geoJSONToWKT(location as unknown as GeoJSON);
+  }
+
+  throw new Error('Invalid location format');
+}
+
 // ==================== Create Monitor Tool ====================
 
 const createMonitorDefinition = {
   name: 'create_monitor',
   description:
-    'Create a new monitor for an area of interest (AOI). Monitors track changes in satellite imagery availability and send notifications via webhook.',
+    'Create a new monitor (notification) for an area of interest. Monitors track changes in satellite imagery availability and send notifications via webhook.',
   inputSchema: {
     type: 'object',
     properties: {
       location: {
-        type: 'object',
-        description: 'GeoJSON Point or Polygon for the area to monitor',
-        properties: {
-          type: {
-            type: 'string',
-            enum: ['Point', 'Polygon'],
-            description: 'GeoJSON geometry type',
-          },
-          coordinates: {
-            description:
-              'Coordinates: [longitude, latitude] for Point, or array of coordinate rings for Polygon',
-          },
-        },
-        required: ['type', 'coordinates'],
+        type: 'string',
+        description: 'Location as coordinates "lat,lng", GeoJSON string, or WKT POLYGON',
       },
       webhookUrl: {
         type: 'string',
         description: 'URL to receive webhook notifications when new imagery is available',
       },
-      resolution: {
+      name: {
         type: 'string',
-        description: 'Minimum resolution to monitor for (e.g., "0.5m", "1m", "3m")',
+        description: 'Optional name for the monitor',
       },
-      imageType: {
-        type: 'string',
-        enum: ['optical', 'sar', 'multispectral', 'hyperspectral'],
-        description: 'Type of imagery to monitor for (default: optical)',
+      resolutionMax: {
+        type: 'number',
+        description: 'Maximum resolution in meters to filter for',
       },
-      frequency: {
-        type: 'string',
-        description: 'How often to check for new imagery (e.g., "daily", "weekly")',
+      cloudCoverMax: {
+        type: 'number',
+        description: 'Maximum cloud coverage percentage (0-100)',
       },
-      notifyOnNewImagery: {
-        type: 'boolean',
-        description: 'Send notification when new imagery is available (default: true)',
-      },
-      notifyOnPriceChange: {
-        type: 'boolean',
-        description: 'Send notification when pricing changes (default: false)',
+      offNadirMax: {
+        type: 'number',
+        description: 'Maximum off-nadir angle in degrees',
       },
     },
     required: ['location', 'webhookUrl'],
@@ -96,13 +122,24 @@ async function createMonitorHandler(
   if ('error' in result) return result.error;
   const { apiKey } = result;
 
-  const locationInput = args.location as Record<string, unknown>;
+  const locationInput = args.location as string | undefined;
   const webhookUrl = args.webhookUrl as string;
-  const resolution = args.resolution as string | undefined;
-  const imageType = args.imageType as ImageType | undefined;
-  const frequency = args.frequency as string | undefined;
-  const notifyOnNewImagery = args.notifyOnNewImagery as boolean | undefined;
-  const notifyOnPriceChange = args.notifyOnPriceChange as boolean | undefined;
+
+  // Validate location
+  if (!locationInput) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            error: 'INVALID_REQUEST',
+            message: 'Location is required',
+          }),
+        },
+      ],
+      isError: true,
+    };
+  }
 
   // Validate webhook URL
   if (!webhookUrl || webhookUrl.trim() === '') {
@@ -113,9 +150,6 @@ async function createMonitorHandler(
           text: JSON.stringify({
             error: 'INVALID_REQUEST',
             message: 'Webhook URL is required',
-            details: {
-              hint: 'Provide a valid URL to receive notifications',
-            },
           }),
         },
       ],
@@ -134,28 +168,6 @@ async function createMonitorHandler(
           text: JSON.stringify({
             error: 'INVALID_REQUEST',
             message: 'Invalid webhook URL format',
-            details: {
-              hint: 'Provide a valid HTTP or HTTPS URL',
-            },
-          }),
-        },
-      ],
-      isError: true,
-    };
-  }
-
-  // Validate location
-  if (!locationInput || !locationInput.type || !locationInput.coordinates) {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            error: 'INVALID_REQUEST',
-            message: 'Location is required with type and coordinates',
-            details: {
-              hint: 'Provide a GeoJSON Point or Polygon',
-            },
           }),
         },
       ],
@@ -166,33 +178,30 @@ async function createMonitorHandler(
   try {
     const client = createSkyFiClient({ apiKey });
 
+    // Parse location to WKT
+    const aoi = parseLocationToWKT(locationInput);
+
     // Build the monitor request
     const request: CreateMonitorRequest = {
-      location: {
-        type: locationInput.type as 'Point' | 'Polygon',
-        coordinates: locationInput.coordinates,
-      } as GeoJSON,
-      criteria: {},
+      aoi,
       webhookUrl,
     };
 
-    // Add criteria if provided
-    if (resolution) {
-      request.criteria.resolution = resolution;
-    }
-    if (imageType) {
-      request.criteria.imageType = imageType;
-    }
-    if (frequency) {
-      request.criteria.frequency = frequency;
+    // Add optional name
+    if (args.name) {
+      request.name = args.name as string;
     }
 
-    // Add notification preferences
-    if (notifyOnNewImagery !== undefined || notifyOnPriceChange !== undefined) {
-      request.notificationPreferences = {
-        onNewImagery: notifyOnNewImagery ?? true,
-        onPriceChange: notifyOnPriceChange ?? false,
-      };
+    // Add filters if provided
+    const resolutionMax = args.resolutionMax as number | undefined;
+    const cloudCoverMax = args.cloudCoverMax as number | undefined;
+    const offNadirMax = args.offNadirMax as number | undefined;
+
+    if (resolutionMax !== undefined || cloudCoverMax !== undefined || offNadirMax !== undefined) {
+      request.filters = {};
+      if (resolutionMax !== undefined) request.filters.resolutionMax = resolutionMax;
+      if (cloudCoverMax !== undefined) request.filters.cloudCoverMax = cloudCoverMax;
+      if (offNadirMax !== undefined) request.filters.offNadirMax = offNadirMax;
     }
 
     const monitor: Monitor = await client.createMonitor(request);
@@ -200,13 +209,14 @@ async function createMonitorHandler(
     const formattedResponse = {
       success: true,
       monitor: {
-        id: monitor.id,
+        id: monitor.notificationId || monitor.id,
         status: monitor.status,
-        location: monitor.location,
-        criteria: monitor.criteria,
+        name: monitor.name,
+        aoi: monitor.aoi,
+        filters: monitor.filters,
         webhookUrl: monitor.webhookUrl,
         createdAt: monitor.createdAt,
-        message: `Monitor ${monitor.id} created successfully`,
+        message: `Monitor ${monitor.notificationId || monitor.id} created successfully`,
       },
     };
 
@@ -255,11 +265,10 @@ async function createMonitorHandler(
 
 const listMonitorsDefinition = {
   name: 'list_monitors',
-  description: 'List all active monitors for the authenticated user.',
+  description: 'List all active monitors (notifications) for the authenticated user.',
   inputSchema: {
     type: 'object',
-    properties: {
-    },
+    properties: {},
     required: [],
   },
 };
@@ -278,13 +287,15 @@ async function listMonitorsHandler(
     const formattedResponse = {
       success: true,
       monitors: response.monitors.map((monitor) => ({
-        id: monitor.id,
+        id: monitor.notificationId || monitor.id,
         status: monitor.status,
-        location: monitor.location,
-        criteria: monitor.criteria,
+        name: monitor.name,
+        aoi: monitor.aoi,
+        filters: monitor.filters,
         webhookUrl: monitor.webhookUrl,
         createdAt: monitor.createdAt,
         lastTriggered: monitor.lastTriggered,
+        triggerCount: monitor.triggerCount,
       })),
       total: response.total,
     };
@@ -334,7 +345,7 @@ async function listMonitorsHandler(
 
 const getMonitorDefinition = {
   name: 'get_monitor',
-  description: 'Get details of a specific monitor by ID.',
+  description: 'Get details of a specific monitor (notification) by ID.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -378,13 +389,15 @@ async function getMonitorHandler(
     const formattedResponse = {
       success: true,
       monitor: {
-        id: monitor.id,
+        id: monitor.notificationId || monitor.id,
         status: monitor.status,
-        location: monitor.location,
-        criteria: monitor.criteria,
+        name: monitor.name,
+        aoi: monitor.aoi,
+        filters: monitor.filters,
         webhookUrl: monitor.webhookUrl,
         createdAt: monitor.createdAt,
         lastTriggered: monitor.lastTriggered,
+        triggerCount: monitor.triggerCount,
       },
     };
 
@@ -433,7 +446,7 @@ async function getMonitorHandler(
 
 const deleteMonitorDefinition = {
   name: 'delete_monitor',
-  description: 'Delete a monitor permanently.',
+  description: 'Delete a monitor (notification) permanently.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -520,196 +533,6 @@ async function deleteMonitorHandler(
   }
 }
 
-// ==================== Pause Monitor Tool ====================
-
-const pauseMonitorDefinition = {
-  name: 'pause_monitor',
-  description: 'Pause an active monitor. The monitor will stop sending notifications until resumed.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      monitorId: {
-        type: 'string',
-        description: 'ID of the monitor to pause',
-      },
-    },
-    required: ['monitorId'],
-  },
-};
-
-async function pauseMonitorHandler(
-  args: Record<string, unknown>
-): Promise<MCPToolCallResponse> {
-  const result = getApiKeyOrError();
-  if ('error' in result) return result.error;
-  const { apiKey } = result;
-
-  const monitorId = args.monitorId as string;
-
-  if (!monitorId || monitorId.trim() === '') {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            error: 'INVALID_REQUEST',
-            message: 'Monitor ID is required',
-          }),
-        },
-      ],
-      isError: true,
-    };
-  }
-
-  try {
-    const client = createSkyFiClient({ apiKey });
-    const monitor: Monitor = await client.pauseMonitor(monitorId);
-
-    const formattedResponse = {
-      success: true,
-      monitor: {
-        id: monitor.id,
-        status: monitor.status,
-        message: `Monitor ${monitor.id} has been paused`,
-      },
-    };
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(formattedResponse, null, 2),
-        },
-      ],
-    };
-  } catch (error) {
-    if (error instanceof SkyFiApiException) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              error: error.code,
-              message: error.message,
-              statusCode: error.statusCode,
-              details: error.details,
-            }),
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            error: 'INTERNAL_ERROR',
-            message: error instanceof Error ? error.message : 'Unknown error occurred',
-          }),
-        },
-      ],
-      isError: true,
-    };
-  }
-}
-
-// ==================== Resume Monitor Tool ====================
-
-const resumeMonitorDefinition = {
-  name: 'resume_monitor',
-  description: 'Resume a paused monitor. The monitor will start sending notifications again.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      monitorId: {
-        type: 'string',
-        description: 'ID of the monitor to resume',
-      },
-    },
-    required: ['monitorId'],
-  },
-};
-
-async function resumeMonitorHandler(
-  args: Record<string, unknown>
-): Promise<MCPToolCallResponse> {
-  const result = getApiKeyOrError();
-  if ('error' in result) return result.error;
-  const { apiKey } = result;
-
-  const monitorId = args.monitorId as string;
-
-  if (!monitorId || monitorId.trim() === '') {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            error: 'INVALID_REQUEST',
-            message: 'Monitor ID is required',
-          }),
-        },
-      ],
-      isError: true,
-    };
-  }
-
-  try {
-    const client = createSkyFiClient({ apiKey });
-    const monitor: Monitor = await client.resumeMonitor(monitorId);
-
-    const formattedResponse = {
-      success: true,
-      monitor: {
-        id: monitor.id,
-        status: monitor.status,
-        message: `Monitor ${monitor.id} has been resumed`,
-      },
-    };
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(formattedResponse, null, 2),
-        },
-      ],
-    };
-  } catch (error) {
-    if (error instanceof SkyFiApiException) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              error: error.code,
-              message: error.message,
-              statusCode: error.statusCode,
-              details: error.details,
-            }),
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            error: 'INTERNAL_ERROR',
-            message: error instanceof Error ? error.message : 'Unknown error occurred',
-          }),
-        },
-      ],
-      isError: true,
-    };
-  }
-}
-
 // ==================== Tool Registration ====================
 
 export function registerMonitorTools(): void {
@@ -717,8 +540,6 @@ export function registerMonitorTools(): void {
   toolRegistry.register(listMonitorsDefinition, listMonitorsHandler);
   toolRegistry.register(getMonitorDefinition, getMonitorHandler);
   toolRegistry.register(deleteMonitorDefinition, deleteMonitorHandler);
-  toolRegistry.register(pauseMonitorDefinition, pauseMonitorHandler);
-  toolRegistry.register(resumeMonitorDefinition, resumeMonitorHandler);
 }
 
 // Export handlers for testing
@@ -727,6 +548,4 @@ export {
   listMonitorsHandler,
   getMonitorHandler,
   deleteMonitorHandler,
-  pauseMonitorHandler,
-  resumeMonitorHandler,
 };

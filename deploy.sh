@@ -64,11 +64,21 @@ run_remote "cd $APP_DIR && pnpm install && pnpm build"
 
 # Create environment file
 echo -e "${YELLOW}Step 6: Creating environment file...${NC}"
-echo -e "${YELLOW}Enter your SkyFi API key:${NC}"
-read -r SKYFI_KEY
+
+# Read API key from local .env file
+if [ -f ".env" ]; then
+    SKYFI_KEY=$(grep "^SKYFI_API_KEY=" .env | cut -d '=' -f2)
+fi
+
 if [ -z "$SKYFI_KEY" ]; then
-    echo -e "${RED}Error: SkyFi API key is required${NC}"
-    exit 1
+    echo -e "${YELLOW}Enter your SkyFi API key:${NC}"
+    read -r SKYFI_KEY
+    if [ -z "$SKYFI_KEY" ]; then
+        echo -e "${RED}Error: SkyFi API key is required${NC}"
+        exit 1
+    fi
+else
+    echo -e "${GREEN}Using API key from local .env file${NC}"
 fi
 
 run_remote "cat > $APP_DIR/.env << 'EOF'

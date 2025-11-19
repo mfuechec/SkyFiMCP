@@ -9,65 +9,83 @@ import type {
   PricingRequest,
   PricingResponse,
   FeasibilityResponse,
-  TaskingRequest,
+  FeasibilityRequest,
   GeoJSON,
-  ImageType,
+  GeoJSONPoint,
 } from '../services/skyfi/types.js';
+import { geoJSONToWKT } from '../services/skyfi/types.js';
+
+// ==================== Helper Functions ====================
+
+/**
+ * Parse location input to WKT format
+ */
+function parseLocationToWKT(location: string | Record<string, unknown>): string {
+  // If it's a string, check various formats
+  if (typeof location === 'string') {
+    // Check if already WKT
+    if (location.toUpperCase().startsWith('POLYGON')) {
+      return location;
+    }
+
+    // Check if coordinate string
+    const coordMatch = location.match(/^(-?\d+\.?\d*),\s*(-?\d+\.?\d*)$/);
+    if (coordMatch) {
+      const lat = parseFloat(coordMatch[1]);
+      const lng = parseFloat(coordMatch[2]);
+      const geojson: GeoJSONPoint = {
+        type: 'Point',
+        coordinates: [lng, lat],
+      };
+      return geoJSONToWKT(geojson);
+    }
+
+    // Try parsing as GeoJSON
+    try {
+      const parsed = JSON.parse(location);
+      if (parsed.type === 'Point' || parsed.type === 'Polygon') {
+        return geoJSONToWKT(parsed as GeoJSON);
+      }
+    } catch {
+      // Not JSON
+    }
+
+    throw new Error(`Invalid location format: "${location}"`);
+  }
+
+  // If it's an object, assume it's GeoJSON
+  if (location.type === 'Point' || location.type === 'Polygon') {
+    return geoJSONToWKT(location as unknown as GeoJSON);
+  }
+
+  throw new Error('Invalid location format');
+}
 
 // ==================== Get Pricing Estimate Tool ====================
 
 const getPricingEstimateDefinition = {
   name: 'get_pricing_estimate',
   description:
-    'Calculate pricing estimate for satellite imagery based on image ID or tasking request. Returns price breakdown, estimated delivery time, and provider information.',
+    'Calculate pricing estimate for satellite imagery based on area of interest and desired resolutions/products.',
   inputSchema: {
     type: 'object',
     properties: {
-      imageId: {
+      location: {
         type: 'string',
-        description: 'ID of existing archive imagery to get pricing for',
+        description: 'Location as coordinates "lat,lng", GeoJSON string, or WKT POLYGON',
       },
-      taskingRequest: {
-        type: 'object',
-        description: 'Tasking request for new imagery capture',
-        properties: {
-          location: {
-            type: 'object',
-            description: 'GeoJSON Point or Polygon for the area of interest',
-            properties: {
-              type: {
-                type: 'string',
-                enum: ['Point', 'Polygon'],
-                description: 'GeoJSON geometry type',
-              },
-              coordinates: {
-                description:
-                  'Coordinates: [longitude, latitude] for Point, or array of coordinate rings for Polygon',
-              },
-            },
-            required: ['type', 'coordinates'],
-          },
-          resolution: {
-            type: 'string',
-            description: 'Desired image resolution (e.g., "0.5m", "1m", "3m")',
-          },
-          captureDate: {
-            type: 'string',
-            description: 'Desired capture date in ISO 8601 format (optional)',
-          },
-          imageType: {
-            type: 'string',
-            enum: ['optical', 'sar', 'multispectral', 'hyperspectral'],
-            description: 'Type of imagery (default: optical)',
-          },
-        },
-        required: ['location', 'resolution'],
+      products: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'List of product types to get pricing for (optional)',
+      },
+      resolutions: {
+        type: 'array',
+        items: { type: 'number' },
+        description: 'List of resolution values in meters to get pricing for (optional)',
       },
     },
-    oneOf: [
-      { required: ['imageId'] },
-      { required: ['taskingRequest'] },
-    ],
+    required: ['location'],
   },
 };
 
@@ -90,36 +108,16 @@ async function getPricingEstimateHandler(
     };
   }
 
-  const imageId = args.imageId as string | undefined;
-  const taskingRequestInput = args.taskingRequest as Record<string, unknown> | undefined;
+  const locationInput = args.location as string | undefined;
 
-  // Validate that either imageId or taskingRequest is provided
-  if (!imageId && !taskingRequestInput) {
+  if (!locationInput) {
     return {
       content: [
         {
           type: 'text',
           text: JSON.stringify({
             error: 'INVALID_REQUEST',
-            message: 'Either imageId or taskingRequest must be provided',
-            details: {
-              hint: 'Provide imageId for existing archive imagery, or taskingRequest for new capture',
-            },
-          }),
-        },
-      ],
-      isError: true,
-    };
-  }
-
-  if (imageId && taskingRequestInput) {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            error: 'INVALID_REQUEST',
-            message: 'Only one of imageId or taskingRequest should be provided, not both',
+            message: 'Location is required',
           }),
         },
       ],
@@ -130,31 +128,20 @@ async function getPricingEstimateHandler(
   try {
     const client = createSkyFiClient({ apiKey });
 
+    // Parse location to WKT
+    const aoi = parseLocationToWKT(locationInput);
+
     // Build the pricing request
-    const pricingRequest: PricingRequest = {};
+    const pricingRequest: PricingRequest = {
+      aoi,
+    };
 
-    if (imageId) {
-      pricingRequest.imageId = imageId;
-    } else if (taskingRequestInput) {
-      const locationInput = taskingRequestInput.location as Record<string, unknown>;
+    if (args.products) {
+      pricingRequest.products = args.products as string[];
+    }
 
-      const taskingRequest: TaskingRequest = {
-        location: {
-          type: locationInput.type as 'Point' | 'Polygon',
-          coordinates: locationInput.coordinates,
-        } as GeoJSON,
-        resolution: taskingRequestInput.resolution as string,
-      };
-
-      if (taskingRequestInput.captureDate) {
-        taskingRequest.captureDate = taskingRequestInput.captureDate as string;
-      }
-
-      if (taskingRequestInput.imageType) {
-        taskingRequest.imageType = taskingRequestInput.imageType as ImageType;
-      }
-
-      pricingRequest.taskingRequest = taskingRequest;
+    if (args.resolutions) {
+      pricingRequest.resolutions = args.resolutions as number[];
     }
 
     const response: PricingResponse = await client.getPricing(pricingRequest);
@@ -169,6 +156,7 @@ async function getPricingEstimateHandler(
         estimatedDelivery: response.estimatedDelivery,
         minimumAoi: response.minimumAoi,
         breakdown: response.breakdown,
+        priceMatrix: response.priceMatrix,
       },
     };
 
@@ -222,51 +210,24 @@ const checkOrderFeasibilityDefinition = {
   inputSchema: {
     type: 'object',
     properties: {
-      imageId: {
+      location: {
         type: 'string',
-        description: 'ID of existing archive imagery to check feasibility for',
+        description: 'Location as coordinates "lat,lng", GeoJSON string, or WKT POLYGON',
       },
-      taskingRequest: {
-        type: 'object',
-        description: 'Tasking request for new imagery capture',
-        properties: {
-          location: {
-            type: 'object',
-            description: 'GeoJSON Point or Polygon for the area of interest',
-            properties: {
-              type: {
-                type: 'string',
-                enum: ['Point', 'Polygon'],
-                description: 'GeoJSON geometry type',
-              },
-              coordinates: {
-                description:
-                  'Coordinates: [longitude, latitude] for Point, or array of coordinate rings for Polygon',
-              },
-            },
-            required: ['type', 'coordinates'],
-          },
-          resolution: {
-            type: 'string',
-            description: 'Desired image resolution (e.g., "0.5m", "1m", "3m")',
-          },
-          captureDate: {
-            type: 'string',
-            description: 'Desired capture date in ISO 8601 format (optional)',
-          },
-          imageType: {
-            type: 'string',
-            enum: ['optical', 'sar', 'multispectral', 'hyperspectral'],
-            description: 'Type of imagery (default: optical)',
-          },
-        },
-        required: ['location', 'resolution'],
+      dateFrom: {
+        type: 'string',
+        description: 'Start date for feasibility check in ISO 8601 format',
+      },
+      dateTo: {
+        type: 'string',
+        description: 'End date for feasibility check in ISO 8601 format',
+      },
+      resolution: {
+        type: 'number',
+        description: 'Desired resolution in meters',
       },
     },
-    oneOf: [
-      { required: ['imageId'] },
-      { required: ['taskingRequest'] },
-    ],
+    required: ['location'],
   },
 };
 
@@ -289,43 +250,16 @@ async function checkOrderFeasibilityHandler(
     };
   }
 
-  const imageId = args.imageId as string | undefined;
-  const taskingRequestInput = args.taskingRequest as Record<string, unknown> | undefined;
+  const locationInput = args.location as string | undefined;
 
-  // Validate that either imageId or taskingRequest is provided
-  if (!imageId && !taskingRequestInput) {
+  if (!locationInput) {
     return {
       content: [
         {
           type: 'text',
           text: JSON.stringify({
             error: 'INVALID_REQUEST',
-            message: 'Either imageId or taskingRequest must be provided',
-            details: {
-              hint: 'Provide imageId for existing archive imagery, or taskingRequest for new capture',
-              commonReasons: [
-                'Missing required parameters',
-                'Invalid input format',
-              ],
-            },
-          }),
-        },
-      ],
-      isError: true,
-    };
-  }
-
-  if (imageId && taskingRequestInput) {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            error: 'INVALID_REQUEST',
-            message: 'Only one of imageId or taskingRequest should be provided, not both',
-            details: {
-              hint: 'Use imageId for archive imagery or taskingRequest for new capture, not both',
-            },
+            message: 'Location is required',
           }),
         },
       ],
@@ -336,34 +270,27 @@ async function checkOrderFeasibilityHandler(
   try {
     const client = createSkyFiClient({ apiKey });
 
-    // Build the pricing request (same structure used for feasibility)
-    const pricingRequest: PricingRequest = {};
+    // Parse location to WKT
+    const aoi = parseLocationToWKT(locationInput);
 
-    if (imageId) {
-      pricingRequest.imageId = imageId;
-    } else if (taskingRequestInput) {
-      const locationInput = taskingRequestInput.location as Record<string, unknown>;
+    // Build the feasibility request
+    const feasibilityRequest: FeasibilityRequest = {
+      aoi,
+    };
 
-      const taskingRequest: TaskingRequest = {
-        location: {
-          type: locationInput.type as 'Point' | 'Polygon',
-          coordinates: locationInput.coordinates,
-        } as GeoJSON,
-        resolution: taskingRequestInput.resolution as string,
-      };
-
-      if (taskingRequestInput.captureDate) {
-        taskingRequest.captureDate = taskingRequestInput.captureDate as string;
-      }
-
-      if (taskingRequestInput.imageType) {
-        taskingRequest.imageType = taskingRequestInput.imageType as ImageType;
-      }
-
-      pricingRequest.taskingRequest = taskingRequest;
+    if (args.dateFrom) {
+      feasibilityRequest.dateFrom = args.dateFrom as string;
     }
 
-    const response: FeasibilityResponse = await client.checkFeasibility(pricingRequest);
+    if (args.dateTo) {
+      feasibilityRequest.dateTo = args.dateTo as string;
+    }
+
+    if (args.resolution) {
+      feasibilityRequest.resolution = args.resolution as number;
+    }
+
+    const response: FeasibilityResponse = await client.checkFeasibility(feasibilityRequest);
 
     // Format the response with detailed information
     if (response.feasible) {
@@ -376,6 +303,8 @@ async function checkOrderFeasibilityHandler(
               feasibility: {
                 feasible: true,
                 message: 'Order is feasible and can be processed',
+                feasibilityId: response.feasibilityId,
+                passPredictions: response.passPredictions,
               },
             }, null, 2),
           },
@@ -386,7 +315,7 @@ async function checkOrderFeasibilityHandler(
       const infeasibilityDetails = formatInfeasibilityDetails(
         response.reason,
         response.alternatives,
-        taskingRequestInput
+        args
       );
 
       return {
@@ -455,7 +384,7 @@ async function checkOrderFeasibilityHandler(
 function formatInfeasibilityDetails(
   reason: string | undefined,
   alternatives: string[] | undefined,
-  taskingRequest: Record<string, unknown> | undefined
+  args: Record<string, unknown>
 ): { explanation: string; suggestions: string[] } {
   const suggestions: string[] = [];
   let explanation = reason || 'Order cannot be fulfilled';
@@ -492,14 +421,9 @@ function formatInfeasibilityDetails(
     }
   }
 
-  // Add suggestions based on tasking request parameters
-  if (taskingRequest) {
-    if (taskingRequest.imageType === 'hyperspectral') {
-      suggestions.push('Hyperspectral imagery has limited availability - consider multispectral as alternative');
-    }
-    if (taskingRequest.resolution && parseFloat(taskingRequest.resolution as string) < 0.5) {
-      suggestions.push('Very high resolution (<0.5m) has limited provider availability');
-    }
+  // Add suggestions based on request parameters
+  if (args.resolution && (args.resolution as number) < 0.5) {
+    suggestions.push('Very high resolution (<0.5m) has limited provider availability');
   }
 
   // Add alternative-based suggestions
@@ -529,10 +453,10 @@ function formatApiErrorDetails(error: SkyFiApiException): {
   switch (error.statusCode) {
     case 400:
       possibleCauses.push('Invalid request parameters');
-      possibleCauses.push('Malformed GeoJSON coordinates');
+      possibleCauses.push('Malformed WKT coordinates');
       possibleCauses.push('Invalid date format');
       suggestions.push('Verify all required fields are provided');
-      suggestions.push('Check coordinate format: [longitude, latitude]');
+      suggestions.push('Check WKT POLYGON format');
       suggestions.push('Use ISO 8601 date format');
       break;
     case 401:
@@ -548,9 +472,8 @@ function formatApiErrorDetails(error: SkyFiApiException): {
       suggestions.push('Contact support to upgrade access');
       break;
     case 404:
-      possibleCauses.push('Image ID not found');
-      possibleCauses.push('Resource does not exist');
-      suggestions.push('Verify the image ID is correct');
+      possibleCauses.push('Resource not found');
+      suggestions.push('Verify the request parameters');
       suggestions.push('Search archive for available imagery');
       break;
     case 429:

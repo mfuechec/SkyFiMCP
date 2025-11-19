@@ -15,7 +15,9 @@ import type {
   PricingRequest,
   PricingResponse,
   FeasibilityResponse,
-  PlaceOrderRequest,
+  FeasibilityRequest,
+  PlaceArchiveOrderRequest,
+  PlaceTaskingOrderRequest,
   Order,
   ListOrdersRequest,
   ListOrdersResponse,
@@ -78,7 +80,7 @@ export class SkyFiClient {
     // Add request interceptor for authentication
     this.client.interceptors.request.use(
       (config: InternalAxiosRequestConfig) => {
-        config.headers.Authorization = `Bearer ${this.config.apiKey}`;
+        config.headers['X-Skyfi-Api-Key'] = this.config.apiKey;
         return config;
       }
     );
@@ -167,7 +169,7 @@ export class SkyFiClient {
   async searchArchive(request: SearchArchiveRequest): Promise<SearchArchiveResponse> {
     return this.withRetry(async () => {
       const response = await this.client.post<SearchArchiveResponse>(
-        '/archive/search',
+        '/archives',
         request
       );
       return response.data;
@@ -182,7 +184,7 @@ export class SkyFiClient {
   async getPricing(request: PricingRequest): Promise<PricingResponse> {
     return this.withRetry(async () => {
       const response = await this.client.post<PricingResponse>(
-        '/pricing/estimate',
+        '/pricing',
         request
       );
       return response.data;
@@ -192,11 +194,23 @@ export class SkyFiClient {
   /**
    * Check if an order is feasible
    */
-  async checkFeasibility(request: PricingRequest): Promise<FeasibilityResponse> {
+  async checkFeasibility(request: FeasibilityRequest): Promise<FeasibilityResponse> {
     return this.withRetry(async () => {
       const response = await this.client.post<FeasibilityResponse>(
-        '/pricing/feasibility',
+        '/feasibility',
         request
+      );
+      return response.data;
+    });
+  }
+
+  /**
+   * Get feasibility status by ID
+   */
+  async getFeasibilityStatus(feasibilityId: string): Promise<FeasibilityResponse> {
+    return this.withRetry(async () => {
+      const response = await this.client.get<FeasibilityResponse>(
+        `/feasibility/${feasibilityId}`
       );
       return response.data;
     });
@@ -205,11 +219,21 @@ export class SkyFiClient {
   // ==================== Orders ====================
 
   /**
-   * Place an order for imagery
+   * Place an archive order for existing imagery
    */
-  async placeOrder(request: PlaceOrderRequest): Promise<Order> {
+  async placeArchiveOrder(request: PlaceArchiveOrderRequest): Promise<Order> {
     return this.withRetry(async () => {
-      const response = await this.client.post<Order>('/orders', request);
+      const response = await this.client.post<Order>('/order-archive', request);
+      return response.data;
+    });
+  }
+
+  /**
+   * Place a tasking order for new imagery capture
+   */
+  async placeTaskingOrder(request: PlaceTaskingOrderRequest): Promise<Order> {
+    return this.withRetry(async () => {
+      const response = await this.client.post<Order>('/order-tasking', request);
       return response.data;
     });
   }
@@ -237,77 +261,53 @@ export class SkyFiClient {
   }
 
   /**
-   * Cancel an order
+   * Request redelivery of an order to a new bucket
    */
-  async cancelOrder(orderId: string): Promise<Order> {
+  async redeliverOrder(orderId: string, deliveryConfig: { bucket: string; path?: string }): Promise<Order> {
     return this.withRetry(async () => {
-      const response = await this.client.post<Order>(`/orders/${orderId}/cancel`);
+      const response = await this.client.post<Order>(`/orders/${orderId}/redelivery`, deliveryConfig);
       return response.data;
     });
   }
 
-  // ==================== Monitoring ====================
+  // ==================== Notifications/Monitoring ====================
 
   /**
-   * Create a new monitor for an area of interest
+   * Create a new notification/monitor for an area of interest
    */
   async createMonitor(request: CreateMonitorRequest): Promise<Monitor> {
     return this.withRetry(async () => {
-      const response = await this.client.post<Monitor>('/monitors', request);
+      const response = await this.client.post<Monitor>('/notifications', request);
       return response.data;
     });
   }
 
   /**
-   * List all monitors
+   * List all notifications/monitors
    */
   async listMonitors(): Promise<ListMonitorsResponse> {
     return this.withRetry(async () => {
-      const response = await this.client.get<ListMonitorsResponse>('/monitors');
+      const response = await this.client.get<ListMonitorsResponse>('/notifications');
       return response.data;
     });
   }
 
   /**
-   * Get monitor by ID
+   * Get notification/monitor by ID
    */
   async getMonitor(monitorId: string): Promise<Monitor> {
     return this.withRetry(async () => {
-      const response = await this.client.get<Monitor>(`/monitors/${monitorId}`);
+      const response = await this.client.get<Monitor>(`/notifications/${monitorId}`);
       return response.data;
     });
   }
 
   /**
-   * Delete a monitor
+   * Delete a notification/monitor
    */
   async deleteMonitor(monitorId: string): Promise<void> {
     return this.withRetry(async () => {
-      await this.client.delete(`/monitors/${monitorId}`);
-    });
-  }
-
-  /**
-   * Pause a monitor
-   */
-  async pauseMonitor(monitorId: string): Promise<Monitor> {
-    return this.withRetry(async () => {
-      const response = await this.client.post<Monitor>(
-        `/monitors/${monitorId}/pause`
-      );
-      return response.data;
-    });
-  }
-
-  /**
-   * Resume a paused monitor
-   */
-  async resumeMonitor(monitorId: string): Promise<Monitor> {
-    return this.withRetry(async () => {
-      const response = await this.client.post<Monitor>(
-        `/monitors/${monitorId}/resume`
-      );
-      return response.data;
+      await this.client.delete(`/notifications/${monitorId}`);
     });
   }
 }
