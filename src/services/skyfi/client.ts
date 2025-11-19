@@ -27,7 +27,7 @@ import type {
 
 // Default configuration
 const DEFAULT_CONFIG: Partial<SkyFiClientConfig> = {
-  baseUrl: 'https://api.skyfi.com/v1',
+  baseUrl: 'https://app.skyfi.com/platform-api',
   timeout: 30000,
   retryAttempts: 3,
   retryDelay: 1000,
