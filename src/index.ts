@@ -8,6 +8,14 @@
 import express, { type Application } from 'express';
 import { mcpRouter, mcpErrorHandler, toolRegistry } from './mcp/index.js';
 import { registerAllTools } from './tools/index.js';
+import {
+  authMiddleware,
+  mcpRateLimiter,
+  securityHeaders,
+  sanitizeRequest,
+  createCorsMiddleware,
+  requestId,
+} from './middleware/index.js';
 
 // Register all tools
 registerAllTools();
@@ -15,10 +23,16 @@ registerAllTools();
 const app: Application = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(express.json());
+// Security middleware (apply to all routes)
+app.use(securityHeaders);
+app.use(requestId);
+app.use(createCorsMiddleware());
 
-// Health check endpoint
+// Body parsing
+app.use(express.json({ limit: '1mb' }));
+app.use(sanitizeRequest);
+
+// Health check endpoint (no auth required)
 app.get('/health', (_req, res) => {
   res.json({
     status: 'healthy',
@@ -28,7 +42,7 @@ app.get('/health', (_req, res) => {
   });
 });
 
-// Server info endpoint
+// Server info endpoint (no auth required)
 app.get('/', (_req, res) => {
   res.json({
     name: 'SkyFi MCP Server',
@@ -43,8 +57,8 @@ app.get('/', (_req, res) => {
   });
 });
 
-// MCP routes
-app.use('/mcp', mcpRouter);
+// MCP routes with authentication and rate limiting
+app.use('/mcp', authMiddleware, mcpRateLimiter, mcpRouter);
 
 // MCP error handler (must be after routes)
 app.use('/mcp', mcpErrorHandler);

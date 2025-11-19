@@ -2,7 +2,7 @@
   "master": {
     "tasks": [
       {
-        "id": "1",
+        "id": 1,
         "title": "Setup Project Repository and CI/CD Pipeline",
         "description": "Initialize the project repository and configure the CI/CD pipeline for automated testing and deployment.",
         "details": "1. Create a new GitHub repository for the SkyFi MCP server.\n2. Set up a CI/CD pipeline using GitHub Actions to automate testing and deployment.\n3. Configure the pipeline to run tests on pull requests and deploy to a demo instance on merge to main.",
@@ -76,7 +76,7 @@
         "updatedAt": "2025-11-19T01:55:06.455Z"
       },
       {
-        "id": "2",
+        "id": 2,
         "title": "Implement MCP Protocol Handlers",
         "description": "Develop the core MCP protocol handlers to manage communication between AI agents and the SkyFi MCP server.",
         "details": "1. Use Express.js to set up the server and define routes for MCP protocol endpoints.\n2. Implement handlers for `tools/list` and `tools/call` following the MCP specification.\n3. Ensure proper error handling and response formatting according to the MCP spec.",
@@ -153,7 +153,7 @@
         "updatedAt": "2025-11-19T02:06:55.730Z"
       },
       {
-        "id": "3",
+        "id": 3,
         "title": "Integrate SkyFi API Client",
         "description": "Develop a client to interact with the SkyFi Public API for data retrieval and order management.",
         "details": "1. Use Axios to create an HTTP client for the SkyFi API.\n2. Implement functions to handle authentication, search, pricing, ordering, and monitoring.\n3. Ensure retry logic and error handling are in place for API requests.",
@@ -162,7 +162,7 @@
         "dependencies": [
           "2"
         ],
-        "status": "in-progress",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
@@ -226,10 +226,10 @@
         "complexity": 8,
         "recommendedSubtasks": 0,
         "expansionPrompt": "Consider expanding the error handling and retry logic into separate subtasks for different types of API errors or network issues.",
-        "updatedAt": "2025-11-19T02:07:32.076Z"
+        "updatedAt": "2025-11-19T02:12:20.772Z"
       },
       {
-        "id": "4",
+        "id": 4,
         "title": "Develop Authentication and Security Middleware",
         "description": "Implement middleware for authentication and security, including API key validation and rate limiting.",
         "details": "1. Create middleware to validate SkyFi API keys provided by users.\n2. Implement rate limiting using a library like express-rate-limit.\n3. Ensure all communications are secured with TLS.",
@@ -238,7 +238,7 @@
         "dependencies": [
           "2"
         ],
-        "status": "pending",
+        "status": "in-progress",
         "subtasks": [
           {
             "id": 1,
@@ -301,10 +301,11 @@
         ],
         "complexity": 7,
         "recommendedSubtasks": 0,
-        "expansionPrompt": "Consider breaking down the TLS configuration into subtasks for certificate management and server configuration."
+        "expansionPrompt": "Consider breaking down the TLS configuration into subtasks for certificate management and server configuration.",
+        "updatedAt": "2025-11-19T02:13:44.116Z"
       },
       {
-        "id": "5",
+        "id": 5,
         "title": "Implement Archive Search Tool",
         "description": "Develop the `search_archive` tool to allow AI agents to search for satellite imagery.",
         "details": "1. Define the `search_archive` tool with parameters for location, date range, resolution, and other filters.\n2. Implement the tool using the SkyFi API client to retrieve imagery data.\n3. Handle errors such as invalid location and no results found.",
@@ -313,7 +314,7 @@
         "dependencies": [
           "3"
         ],
-        "status": "pending",
+        "status": "in-progress",
         "subtasks": [
           {
             "id": 1,
@@ -380,7 +381,7 @@
         "expansionPrompt": "Consider expanding the error handling into separate subtasks for different error scenarios, such as network errors or invalid inputs."
       },
       {
-        "id": "6",
+        "id": 6,
         "title": "Develop Pricing and Feasibility Tools",
         "description": "Implement tools for pricing estimation and order feasibility checks.",
         "details": "1. Implement the `get_pricing_estimate` tool to calculate pricing based on image ID or tasking request.\n2. Develop the `check_order_feasibility` tool to assess order viability.\n3. Ensure detailed error messages for infeasible orders.",
@@ -389,7 +390,7 @@
         "dependencies": [
           "3"
         ],
-        "status": "pending",
+        "status": "in-progress",
         "subtasks": [
           {
             "id": 1,
@@ -457,7 +458,7 @@
         "expansionPrompt": "Consider detailing the error messaging into subtasks for different types of infeasibility reasons."
       },
       {
-        "id": "7",
+        "id": 7,
         "title": "Create Order Placement and Confirmation Workflow",
         "description": "Develop the order placement tool with user confirmation to ensure secure transactions.",
         "details": "1. Implement the `place_order` tool requiring a user confirmation token.\n2. Develop a critical flow to ensure pricing is confirmed before order placement.\n3. Handle errors such as insufficient funds and token mismatches.",
@@ -532,7 +533,7 @@
         "expansionPrompt": "Consider expanding the error handling into separate subtasks for different types of errors, such as token mismatches or insufficient funds."
       },
       {
-        "id": "8",
+        "id": 8,
         "title": "Implement Order Status and History Tools",
         "description": "Develop tools to check order status and retrieve order history for tracking purposes.",
         "details": "1. Implement the `get_order_status` tool to provide order progress and details.\n2. Develop the `list_orders` tool to retrieve a history of past orders.\n3. Support polling for status updates.",
@@ -605,7 +606,7 @@
         "expansionPrompt": "Consider breaking down the polling support into subtasks for different update frequencies or mechanisms."
       },
       {
-        "id": "9",
+        "id": 9,
         "title": "Develop AOI Monitoring Setup Tool",
         "description": "Create tools for setting up and managing area of interest (AOI) monitoring.",
         "details": "1. Implement the `create_monitor` tool to set up monitoring with specified criteria.\n2. Develop tools for listing and deleting monitors.\n3. Implement webhook dispatch if native support is unavailable.",
@@ -683,7 +684,7 @@
         "expansionPrompt": "Consider expanding the webhook dispatch into subtasks for different event types or notification methods."
       },
       {
-        "id": "10",
+        "id": 10,
         "title": "Write Comprehensive Documentation",
         "description": "Develop complete documentation for the MCP server, including API references and integration guides.",
         "details": "1. Write detailed API documentation with examples for each tool.\n2. Create integration guides for connecting AI agents like Claude and GPT.\n3. Document deployment instructions and troubleshooting tips.",
@@ -762,12 +763,15 @@
     ],
     "metadata": {
       "version": "1.0.0",
-      "lastModified": "2025-11-19T02:07:32.077Z",
+      "lastModified": "2025-11-19T02:13:44.117Z",
       "taskCount": 10,
-      "completedCount": 2,
+      "completedCount": 3,
       "tags": [
         "master"
-      ]
+      ],
+      "created": "2025-11-19T02:15:03.785Z",
+      "description": "Tasks for master context",
+      "updated": "2025-11-19T02:15:28.994Z"
     }
   }
 }
