@@ -23,3 +23,12 @@ node_modules/
 
 # OS specific
 .DS_Store
+
+# Build output
+dist/
+
+# Coverage
+coverage/
+
+# pnpm
+pnpm-debug.log
