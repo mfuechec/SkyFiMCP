@@ -553,3 +553,11 @@ export function registerPricingTools(): void {
   toolRegistry.register(getPricingEstimateDefinition, getPricingEstimateHandler);
   toolRegistry.register(checkOrderFeasibilityDefinition, checkOrderFeasibilityHandler);
 }
+
+// Export handlers for testing
+export {
+  getPricingEstimateHandler,
+  checkOrderFeasibilityHandler,
+  formatInfeasibilityDetails,
+  formatApiErrorDetails,
+};
