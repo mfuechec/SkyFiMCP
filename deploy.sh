@@ -54,9 +54,18 @@ run_remote "curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash - && su
 echo -e "${YELLOW}Step 3: Installing pnpm...${NC}"
 run_remote "sudo npm install -g pnpm"
 
-# Clone or update repository
-echo -e "${YELLOW}Step 4: Deploying application...${NC}"
-run_remote "sudo rm -rf $APP_DIR && sudo git clone $REPO_URL $APP_DIR && sudo chown -R $EC2_USER:$EC2_USER $APP_DIR"
+# Deploy local code via rsync
+echo -e "${YELLOW}Step 4: Deploying local application code...${NC}"
+run_remote "sudo rm -rf $APP_DIR && sudo mkdir -p $APP_DIR && sudo chown -R $EC2_USER:$EC2_USER $APP_DIR"
+
+# Rsync local files to EC2 (excluding node_modules, dist, .git)
+rsync -avz --progress \
+  -e "ssh -i $SSH_KEY -o StrictHostKeyChecking=no" \
+  --exclude 'node_modules' \
+  --exclude 'dist' \
+  --exclude '.git' \
+  --exclude '.env' \
+  ./ "$EC2_USER@$EC2_HOST:$APP_DIR/"
 
 # Install dependencies and build
 echo -e "${YELLOW}Step 5: Installing dependencies and building...${NC}"

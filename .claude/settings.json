@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit",
+      "Bash(pnpm *)",
+      "Bash(npm *)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(curl:*)",
+      "Bash(ssh:*)",
+      "WebFetch(domain:app.skyfi.com)",
+      "WebFetch(domain:nominatim.openstreetmap.org)",
+      "WebFetch(domain:overpass-api.de)",
+      "mcp__task-master-ai__*"
+    ]
+  }
+}

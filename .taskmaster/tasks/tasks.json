@@ -759,19 +759,649 @@
         "complexity": 5,
         "recommendedSubtasks": 0,
         "expansionPrompt": "Consider expanding the documentation into subtasks for different user roles or use cases."
+      },
+      {
+        "id": 11,
+        "title": "Integrate Nominatim Client for Geocoding",
+        "description": "Implement the Nominatim client to handle geocoding and reverse geocoding requests.",
+        "details": "Use the Nominatim API to convert addresses to coordinates and vice versa. Implement caching to reduce API calls and ensure compliance with rate limits. Use TypeScript for implementation and ensure the client can handle batch requests.",
+        "testStrategy": "Write unit tests to verify geocoding accuracy and performance. Test with international addresses and batch requests. Ensure compliance with Nominatim's rate limiting.",
+        "priority": "medium",
+        "dependencies": [],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Implement Nominatim Client for Geocoding",
+            "description": "Develop the core client to interact with the Nominatim API for geocoding and reverse geocoding.",
+            "dependencies": [],
+            "details": "Use TypeScript to create a client that sends requests to the Nominatim API. Ensure the client can convert addresses to coordinates and vice versa.\n<info added on 2025-11-20T19:42:08.613Z>\nSuccessfully implemented complete Nominatim client with:\n\n- Rate limiting (1 req/sec compliance with Nominatim policy)\n- Full geocoding and reverse geocoding support\n- Batch processing for multiple addresses/coordinates\n- In-memory caching layer to reduce API calls\n- TypeScript implementation with proper error handling\n- Created MCP tool wrappers for geocodeLocation and reverseGeocode\n\nFiles created:\n\n- packages/mcp/src/services/osm/nominatim-client.ts (main client)\n- packages/mcp/src/services/osm/cache.ts (caching layer)\n- packages/mcp/src/tools/osm/geocode.ts (MCP tools)\n- packages/shared/src/types/osm.ts (TypeScript types)\n</info added on 2025-11-20T19:42:08.613Z>",
+            "status": "done",
+            "testStrategy": "Write unit tests to verify geocoding accuracy with various addresses."
+          },
+          {
+            "id": 2,
+            "title": "Implement Caching Mechanism",
+            "description": "Develop a caching system to store geocoding results and reduce API calls.",
+            "dependencies": [
+              1
+            ],
+            "details": "Use an in-memory cache or a library like Redis to store results. Implement logic to check the cache before making API requests.",
+            "status": "done",
+            "testStrategy": "Test cache hit and miss scenarios to ensure proper caching behavior."
+          },
+          {
+            "id": 3,
+            "title": "Handle Batch Requests",
+            "description": "Enable the client to process multiple geocoding requests in a single batch.",
+            "dependencies": [
+              1
+            ],
+            "details": "Modify the client to accept and process arrays of addresses or coordinates, sending them as batch requests to the API.",
+            "status": "done",
+            "testStrategy": "Test with multiple addresses to ensure batch processing is efficient and accurate."
+          }
+        ]
+      },
+      {
+        "id": 12,
+        "title": "Implement Overpass Client for Feature Search",
+        "description": "Develop a client to interact with the Overpass API for feature discovery based on user queries.",
+        "details": "Use the Overpass API to search for features like warehouses, solar farms, etc. Implement query construction using Overpass QL and handle pagination for large result sets. Ensure the client can filter results based on feature tags and bounding boxes.",
+        "testStrategy": "Create integration tests to verify feature search accuracy and performance. Test with various feature types and bounding boxes. Ensure the client handles queries that return zero results gracefully.",
+        "priority": "medium",
+        "dependencies": [],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Construct Overpass QL Queries",
+            "description": "Develop query construction logic using Overpass QL for feature search.",
+            "dependencies": [],
+            "details": "Implement functions to build Overpass QL queries based on user input for features like warehouses and solar farms.",
+            "status": "done",
+            "testStrategy": "Test query construction with various feature types and ensure correct syntax."
+          },
+          {
+            "id": 2,
+            "title": "Implement Pagination Handling",
+            "description": "Develop logic to handle pagination for large result sets from the Overpass API.",
+            "dependencies": [
+              1
+            ],
+            "details": "Create mechanisms to manage and retrieve paginated data efficiently from the Overpass API.",
+            "status": "done",
+            "testStrategy": "Test pagination with large datasets to ensure all results are retrieved correctly."
+          },
+          {
+            "id": 3,
+            "title": "Develop Result Filtering Mechanism",
+            "description": "Implement filtering of results based on feature tags and bounding boxes.",
+            "dependencies": [
+              1
+            ],
+            "details": "Add functionality to filter API results by specific tags and geographic bounding boxes.",
+            "status": "done",
+            "testStrategy": "Test filtering with different tags and bounding boxes to verify accuracy."
+          },
+          {
+            "id": 4,
+            "title": "Conduct Integration Testing",
+            "description": "Perform integration testing to verify the Overpass client functionality.",
+            "dependencies": [
+              1,
+              2,
+              3
+            ],
+            "details": "Create integration tests to ensure the client accurately performs feature searches and handles edge cases.",
+            "status": "done",
+            "testStrategy": "Test with various feature types and bounding boxes, ensuring the client handles zero-result queries gracefully."
+          }
+        ]
+      },
+      {
+        "id": 13,
+        "title": "Develop Geocode Location Tool",
+        "description": "Create a tool to convert user-provided addresses into geographic coordinates using the Nominatim client.",
+        "details": "Implement the geocode_location function in TypeScript. Ensure it returns coordinates with a confidence score and handles batch geocoding. Integrate with the caching layer to optimize performance.",
+        "testStrategy": "Test the tool with a variety of addresses, including edge cases like partial addresses and international locations. Verify the accuracy of the returned coordinates and confidence scores.",
+        "priority": "medium",
+        "dependencies": [
+          11
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Implement geocode_location Function in TypeScript",
+            "description": "Develop the geocode_location function to convert addresses into geographic coordinates using the Nominatim client.",
+            "dependencies": [],
+            "details": "Create the geocode_location function in TypeScript. Ensure it returns coordinates with a confidence score and supports batch geocoding. Use the Nominatim client for address conversion.",
+            "status": "done",
+            "testStrategy": "Test with various addresses, including edge cases, to verify accuracy and confidence scores."
+          },
+          {
+            "id": 2,
+            "title": "Integrate geocode_location with Caching Layer",
+            "description": "Optimize the geocode_location function by integrating it with the caching layer to improve performance.",
+            "dependencies": [
+              1
+            ],
+            "details": "Integrate the geocode_location function with the existing caching layer. Ensure that repeated requests for the same address are efficiently handled using cached results.",
+            "status": "done",
+            "testStrategy": "Test performance improvements by comparing response times with and without caching for repeated address queries."
+          }
+        ]
+      },
+      {
+        "id": 14,
+        "title": "Create Reverse Geocode Tool",
+        "description": "Develop a tool to convert geographic coordinates into human-readable addresses using the Nominatim client.",
+        "details": "Implement the reverse_geocode function in TypeScript. Ensure it returns detailed address information and place types. Integrate with the caching layer to reduce API calls.",
+        "testStrategy": "Test the tool with a range of coordinates, including urban and rural locations. Verify the accuracy and completeness of the returned address information.",
+        "priority": "medium",
+        "dependencies": [
+          11
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Implement reverse_geocode Function in TypeScript",
+            "description": "Develop the reverse_geocode function to convert coordinates into addresses using Nominatim.",
+            "dependencies": [],
+            "details": "Use the Nominatim client to fetch address data. Ensure the function returns detailed address information and place types. Integrate with the caching layer to minimize API calls.",
+            "status": "done",
+            "testStrategy": "Test with various coordinates to ensure accurate address conversion."
+          },
+          {
+            "id": 2,
+            "title": "Test reverse_geocode Function with Diverse Coordinates",
+            "description": "Conduct tests on the reverse_geocode function using a range of geographic coordinates.",
+            "dependencies": [
+              1
+            ],
+            "details": "Prepare test cases with urban and rural coordinates. Verify the accuracy and completeness of the returned address information. Ensure caching reduces API calls effectively.",
+            "status": "done",
+            "testStrategy": "Use automated tests to validate address accuracy and caching efficiency."
+          }
+        ]
+      },
+      {
+        "id": 15,
+        "title": "Implement Find Features by Type Tool",
+        "description": "Develop a tool to find geographic features by type using the Overpass client.",
+        "details": "Implement the find_features_by_type function in TypeScript. Allow users to specify feature types and bounding boxes. Ensure the tool returns feature metadata and handles pagination for large result sets.",
+        "testStrategy": "Test the tool with various feature types and bounding boxes. Verify the accuracy and completeness of the returned features and metadata.",
+        "priority": "medium",
+        "dependencies": [
+          12
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Implement Feature Type Filtering",
+            "description": "Develop logic to filter geographic features by specified types.",
+            "dependencies": [],
+            "details": "Create a function to accept feature types as input and filter results accordingly. Integrate this with the Overpass client query.",
+            "status": "done",
+            "testStrategy": "Test with various feature types to ensure correct filtering."
+          },
+          {
+            "id": 2,
+            "title": "Handle Bounding Box Input",
+            "description": "Implement functionality to process and apply bounding box constraints.",
+            "dependencies": [
+              1
+            ],
+            "details": "Develop a method to accept bounding box parameters and incorporate them into the Overpass query to limit the search area.",
+            "status": "done",
+            "testStrategy": "Test with different bounding box sizes and locations to verify correct area filtering."
+          },
+          {
+            "id": 3,
+            "title": "Implement Pagination for Large Result Sets",
+            "description": "Develop a system to handle pagination of large data sets returned by the Overpass client.",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Create a mechanism to manage and return paginated results, ensuring all data is accessible without overwhelming the client.",
+            "status": "done",
+            "testStrategy": "Test with large data sets to ensure pagination works correctly and all data can be retrieved."
+          }
+        ]
+      },
+      {
+        "id": 16,
+        "title": "Develop Find Features by Query Tool",
+        "description": "Create a tool to find geographic features based on user queries using the Overpass client.",
+        "details": "Implement the find_features_by_query function in TypeScript. Allow users to specify queries and search radii. Ensure the tool returns relevant features and handles cases where no results are found.",
+        "testStrategy": "Test the tool with a variety of queries and locations. Verify the accuracy and relevance of the returned features and ensure graceful handling of zero-result queries.",
+        "priority": "medium",
+        "dependencies": [
+          12
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Implement Query Handling Logic",
+            "description": "Develop logic to process and interpret user queries for geographic features.",
+            "dependencies": [
+              12
+            ],
+            "details": "Create a parser to interpret user queries and translate them into Overpass API requests. Ensure support for various query formats and keywords.",
+            "status": "done",
+            "testStrategy": "Test with diverse query formats to ensure accurate interpretation."
+          },
+          {
+            "id": 2,
+            "title": "Implement Search Radius Functionality",
+            "description": "Add functionality to allow users to specify search radii for their queries.",
+            "dependencies": [
+              1
+            ],
+            "details": "Integrate search radius parameters into the query processing logic. Ensure the tool can handle different units and convert them appropriately.",
+            "status": "done",
+            "testStrategy": "Test with various radius values to ensure correct geographic scope."
+          },
+          {
+            "id": 3,
+            "title": "Handle Zero-Result Scenarios",
+            "description": "Ensure the tool gracefully handles cases where no results are found.",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Implement logic to detect zero-result scenarios and provide user feedback. Consider offering suggestions for query refinement.",
+            "status": "done",
+            "testStrategy": "Test with queries expected to return no results to verify user feedback and suggestions."
+          }
+        ]
+      },
+      {
+        "id": 17,
+        "title": "Implement Area Analysis Tool",
+        "description": "Develop a tool to analyze geographic regions and suggest optimal satellite imagery orders.",
+        "details": "Implement the analyze_area function in TypeScript. Calculate feature density and suggest imagery grids. Estimate costs and identify clusters for efficient ordering.",
+        "testStrategy": "Test the tool with different regions and feature types. Verify the accuracy of feature density calculations and cost estimates. Ensure the suggested imagery grids cover the specified features.",
+        "priority": "medium",
+        "dependencies": [
+          15,
+          16
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Calculate Feature Density",
+            "description": "Develop a function to calculate the density of geographic features in a given area.",
+            "dependencies": [],
+            "details": "Implement the feature_density function in TypeScript to analyze spatial data and calculate feature density.",
+            "status": "done",
+            "testStrategy": "Test with various geographic regions to ensure accurate density calculations."
+          },
+          {
+            "id": 2,
+            "title": "Suggest Imagery Grids",
+            "description": "Create a method to suggest optimal satellite imagery grids based on feature density.",
+            "dependencies": [
+              1
+            ],
+            "details": "Develop the suggest_imagery_grids function in TypeScript to propose grids that cover high-density areas efficiently.",
+            "status": "done",
+            "testStrategy": "Verify grid suggestions with different feature densities and ensure coverage efficiency."
+          },
+          {
+            "id": 3,
+            "title": "Estimate Imagery Costs",
+            "description": "Implement a cost estimation function for satellite imagery orders.",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Create the estimate_costs function in TypeScript to calculate costs based on grid suggestions and feature density.",
+            "status": "done",
+            "testStrategy": "Test cost estimates with various grid configurations and feature densities to ensure accuracy."
+          },
+          {
+            "id": 4,
+            "title": "Identify Clusters for Efficient Ordering",
+            "description": "Develop a method to identify clusters of features for efficient imagery ordering.",
+            "dependencies": [
+              1
+            ],
+            "details": "Implement the identify_clusters function in TypeScript to group features into clusters for optimized ordering.",
+            "status": "done",
+            "testStrategy": "Test cluster identification with different feature distributions to ensure efficient ordering."
+          }
+        ]
+      },
+      {
+        "id": 18,
+        "title": "Develop AI Query Processing Module",
+        "description": "Enable natural language processing for user queries to automate geospatial analysis workflows.",
+        "details": "Implement AI-based query parsing using a language model. Decompose queries into actionable steps and integrate with existing tools. Ensure the module can handle synonyms and infer user intent.",
+        "testStrategy": "Test the module with a variety of natural language queries. Verify the accuracy of query decomposition and the relevance of suggested actions. Ensure graceful degradation for ambiguous queries.",
+        "priority": "medium",
+        "dependencies": [
+          13,
+          14,
+          15,
+          16
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Integrate Language Model for Query Parsing",
+            "description": "Integrate a language model to parse user queries into structured data.",
+            "dependencies": [],
+            "details": "Select an appropriate language model and integrate it into the system to parse natural language queries.",
+            "status": "pending",
+            "testStrategy": "Test with diverse queries to ensure accurate parsing."
+          },
+          {
+            "id": 2,
+            "title": "Develop Query Decomposition Logic",
+            "description": "Create logic to decompose parsed queries into actionable steps.",
+            "dependencies": [
+              1
+            ],
+            "details": "Implement algorithms to break down parsed queries into smaller, actionable components.",
+            "status": "pending",
+            "testStrategy": "Verify decomposition accuracy with various query types."
+          },
+          {
+            "id": 3,
+            "title": "Implement Synonym Handling Mechanism",
+            "description": "Develop a mechanism to handle synonyms in user queries.",
+            "dependencies": [
+              1
+            ],
+            "details": "Use a thesaurus or language model capabilities to recognize and process synonyms.",
+            "status": "pending",
+            "testStrategy": "Test with queries containing synonyms to ensure correct interpretation."
+          },
+          {
+            "id": 4,
+            "title": "Design Intent Inference System",
+            "description": "Create a system to infer user intent from queries.",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Develop algorithms to analyze query context and infer user intent accurately.",
+            "status": "pending",
+            "testStrategy": "Evaluate intent inference accuracy with ambiguous queries."
+          },
+          {
+            "id": 5,
+            "title": "Integrate with Existing Geospatial Tools",
+            "description": "Ensure the AI module integrates seamlessly with existing geospatial analysis tools.",
+            "dependencies": [
+              2,
+              3,
+              4
+            ],
+            "details": "Connect the AI module outputs to existing tools for executing geospatial workflows.",
+            "status": "pending",
+            "testStrategy": "Test integration with existing tools to ensure smooth operation."
+          }
+        ]
+      },
+      {
+        "id": 19,
+        "title": "Implement Bulk Operations Tool",
+        "description": "Create tools to handle bulk feasibility checks and imagery orders for multiple locations.",
+        "details": "Implement bulk_feasibility_check and bulk_order_with_confirmation functions in TypeScript. Ensure the tools can process up to 100 locations and provide progress updates.",
+        "testStrategy": "Test the tools with large sets of locations. Verify the accuracy of feasibility checks and the efficiency of bulk ordering. Ensure progress updates are accurate and timely.",
+        "priority": "medium",
+        "dependencies": [
+          17,
+          18
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Develop Bulk Feasibility Check Function",
+            "description": "Implement the bulk_feasibility_check function to handle feasibility checks for multiple locations.",
+            "dependencies": [],
+            "details": "Create a TypeScript function to process up to 100 locations, ensuring efficient handling of feasibility checks.",
+            "status": "pending",
+            "testStrategy": "Test with various location sets to ensure accuracy and performance."
+          },
+          {
+            "id": 2,
+            "title": "Implement Bulk Order with Confirmation Function",
+            "description": "Develop the bulk_order_with_confirmation function to manage imagery orders for multiple locations.",
+            "dependencies": [
+              1
+            ],
+            "details": "Use TypeScript to create a function that processes orders and confirms them for up to 100 locations.",
+            "status": "pending",
+            "testStrategy": "Verify order processing and confirmation accuracy with test datasets."
+          },
+          {
+            "id": 3,
+            "title": "Design Progress Update Mechanism",
+            "description": "Create a system to provide progress updates during bulk operations.",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Implement a real-time progress update feature using TypeScript, ensuring updates are accurate and timely.",
+            "status": "pending",
+            "testStrategy": "Test progress updates with simulated bulk operations to ensure reliability."
+          },
+          {
+            "id": 4,
+            "title": "Integrate Bulk Operations with Existing Tools",
+            "description": "Ensure the new bulk operations tool integrates seamlessly with existing systems.",
+            "dependencies": [
+              1,
+              2,
+              3
+            ],
+            "details": "Connect the bulk operations tool with existing infrastructure, ensuring compatibility and smooth operation.",
+            "status": "pending",
+            "testStrategy": "Conduct integration tests to verify seamless operation with existing tools."
+          }
+        ]
+      },
+      {
+        "id": 20,
+        "title": "Develop Change Detection Analysis Tool",
+        "description": "Create a tool to compare OSM data against satellite imagery for change detection.",
+        "details": "Implement the detect_changes function using AI vision models. Compare OSM features with satellite imagery to detect new constructions, demolitions, and modifications. Provide confidence scores and visual overlays.",
+        "testStrategy": "Test the tool with various types of changes and imagery. Verify the accuracy of change detection and confidence scores. Ensure visual overlays clearly highlight detected changes.",
+        "priority": "medium",
+        "dependencies": [
+          17,
+          18
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Integrate AI Vision Models",
+            "description": "Integrate AI vision models for detecting changes in satellite imagery.",
+            "dependencies": [],
+            "details": "Select and integrate suitable AI vision models to process satellite imagery and detect changes.",
+            "status": "pending",
+            "testStrategy": "Test model integration with sample imagery to ensure compatibility."
+          },
+          {
+            "id": 2,
+            "title": "Develop Change Detection Logic",
+            "description": "Implement logic to compare OSM data with satellite imagery for change detection.",
+            "dependencies": [
+              1
+            ],
+            "details": "Create algorithms to compare OSM features with processed imagery to identify changes.",
+            "status": "pending",
+            "testStrategy": "Test logic with various OSM and imagery datasets to verify accuracy."
+          },
+          {
+            "id": 3,
+            "title": "Implement Confidence Scoring System",
+            "description": "Develop a system to provide confidence scores for detected changes.",
+            "dependencies": [
+              2
+            ],
+            "details": "Design a scoring mechanism to evaluate the reliability of detected changes.",
+            "status": "pending",
+            "testStrategy": "Validate confidence scores against known changes to ensure reliability."
+          },
+          {
+            "id": 4,
+            "title": "Create Visual Overlay Mechanism",
+            "description": "Implement visual overlays to highlight detected changes on imagery.",
+            "dependencies": [
+              2
+            ],
+            "details": "Develop a method to overlay detected changes on satellite images for visualization.",
+            "status": "pending",
+            "testStrategy": "Test overlays with different imagery to ensure clarity and accuracy."
+          },
+          {
+            "id": 5,
+            "title": "Integrate with User Interface",
+            "description": "Integrate change detection results into the user interface for accessibility.",
+            "dependencies": [
+              3,
+              4
+            ],
+            "details": "Ensure detected changes and overlays are accessible and user-friendly in the UI.",
+            "status": "pending",
+            "testStrategy": "Conduct user testing to ensure the interface is intuitive and informative."
+          }
+        ]
+      },
+      {
+        "id": 21,
+        "title": "Implement Predictive Analysis Module",
+        "description": "Develop a module to identify patterns and predict future geospatial changes.",
+        "details": "Implement temporal analysis using historical satellite imagery. Detect trends and anomalies to predict future changes. Integrate with existing tools for comprehensive analysis.",
+        "testStrategy": "Test the module with historical data sets. Verify the accuracy of trend detection and anomaly identification. Ensure predictions are relevant and actionable.",
+        "priority": "medium",
+        "dependencies": [
+          20
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Conduct Temporal Analysis on Historical Imagery",
+            "description": "Perform temporal analysis using historical satellite imagery to identify patterns over time.",
+            "dependencies": [],
+            "details": "Utilize historical satellite imagery to analyze temporal changes. Implement algorithms to process and extract relevant data points over time.",
+            "status": "pending",
+            "testStrategy": "Test with various historical datasets to ensure accurate temporal pattern recognition."
+          },
+          {
+            "id": 2,
+            "title": "Develop Trend Detection Algorithms",
+            "description": "Create algorithms to detect trends in geospatial data.",
+            "dependencies": [
+              1
+            ],
+            "details": "Design and implement algorithms that can identify long-term trends in geospatial data. Use statistical methods to ensure accuracy.",
+            "status": "pending",
+            "testStrategy": "Validate trend detection with known datasets to ensure the algorithms correctly identify trends."
+          },
+          {
+            "id": 3,
+            "title": "Implement Anomaly Detection Mechanisms",
+            "description": "Develop mechanisms to identify anomalies in geospatial data.",
+            "dependencies": [
+              1
+            ],
+            "details": "Create algorithms to detect anomalies in the data, such as unexpected changes or outliers. Use machine learning techniques to improve detection accuracy.",
+            "status": "pending",
+            "testStrategy": "Test anomaly detection with datasets containing known anomalies to verify detection accuracy."
+          },
+          {
+            "id": 4,
+            "title": "Integrate Predictive Module with Existing Tools",
+            "description": "Integrate the predictive analysis module with existing geospatial tools for comprehensive analysis.",
+            "dependencies": [
+              2,
+              3
+            ],
+            "details": "Ensure seamless integration of the new predictive analysis module with existing tools. Focus on data compatibility and user interface consistency.",
+            "status": "pending",
+            "testStrategy": "Conduct integration tests to ensure the module works smoothly with existing tools and provides accurate predictions."
+          },
+          {
+            "id": 5,
+            "title": "Validate Predictive Analysis Module",
+            "description": "Test the predictive analysis module to ensure it provides actionable insights.",
+            "dependencies": [
+              4
+            ],
+            "details": "Perform comprehensive testing of the module using historical and current datasets. Ensure predictions are accurate and actionable.",
+            "status": "pending",
+            "testStrategy": "Use a variety of datasets to test the module's predictions. Verify that the insights are relevant and can be acted upon effectively."
+          }
+        ]
+      },
+      {
+        "id": 22,
+        "title": "Create Automated Reporting Tool",
+        "description": "Develop a tool to generate comprehensive reports based on geospatial analysis results.",
+        "details": "Implement the generate_location_report function in TypeScript. Compile analysis results into structured reports with summaries and visualizations. Provide downloadable PDF reports.",
+        "testStrategy": "Test the tool with various analysis results. Verify the accuracy and completeness of generated reports. Ensure reports are well-structured and visually appealing.",
+        "priority": "medium",
+        "dependencies": [
+          19,
+          20,
+          21
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Implement Report Generation Functionality",
+            "description": "Develop the core function to compile geospatial analysis results into structured reports.",
+            "dependencies": [],
+            "details": "Implement the generate_location_report function in TypeScript to compile analysis results into structured reports with summaries.",
+            "status": "pending",
+            "testStrategy": "Test with sample analysis data to ensure accurate report generation."
+          },
+          {
+            "id": 2,
+            "title": "Integrate Visualization Components",
+            "description": "Add visual elements to the reports to enhance data presentation.",
+            "dependencies": [
+              1
+            ],
+            "details": "Integrate charts and maps into the reports using a visualization library like D3.js or Chart.js.",
+            "status": "pending",
+            "testStrategy": "Verify visualizations with different data sets for clarity and accuracy."
+          },
+          {
+            "id": 3,
+            "title": "Develop PDF Export Functionality",
+            "description": "Enable reports to be exported as downloadable PDF files.",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Use a library like jsPDF to convert the structured reports and visualizations into PDF format.",
+            "status": "pending",
+            "testStrategy": "Test PDF export with various report types to ensure formatting and content integrity."
+          }
+        ]
       }
     ],
     "metadata": {
-      "version": "1.0.0",
-      "lastModified": "2025-11-19T02:19:15.687Z",
-      "taskCount": 10,
-      "completedCount": 4,
-      "tags": [
-        "master"
-      ],
       "created": "2025-11-19T02:21:38.330Z",
-      "description": "Tasks for master context",
-      "updated": "2025-11-19T02:48:42.700Z"
+      "updated": "2025-11-20T19:43:48.822Z",
+      "description": "Tasks for master context"
     }
   }
 }

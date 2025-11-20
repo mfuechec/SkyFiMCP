@@ -95,7 +95,7 @@ export interface PricingResponse {
 export interface FeasibilityRequest {
   aoi: string; // WKT POLYGON format - REQUIRED
   productType: string; // REQUIRED - DAY, NIGHT, VIDEO, SAR, HYPERSPECTRAL, MULTISPECTRAL, STEREO
-  resolution: string[]; // REQUIRED - Array of: MEDIUM, HIGH, VERY_HIGH
+  resolution: string; // REQUIRED - Single string: LOW, MEDIUM, HIGH, VERY HIGH, SUPER HIGH, ULTRA HIGH, CM 30, CM 50
   startDate: string; // REQUIRED - ISO 8601 with timezone
   endDate: string; // REQUIRED - ISO 8601 with timezone
   maxCloudCoveragePercent?: number;
@@ -103,18 +103,47 @@ export interface FeasibilityRequest {
   requiredProvider?: string; // PLANET or UMBRA
 }
 
-// Feasibility response
-export interface FeasibilityResponse {
-  feasibilityId?: string;
-  status?: string;
-  feasible?: boolean;
-  reason?: string;
-  alternatives?: string[];
-  passPredictions?: Array<{
-    satellite: string;
-    passTime: string;
-    offNadir: number;
+// Weather details in feasibility response
+export interface WeatherDetails {
+  weatherScore: number;
+  clouds?: Array<{
+    date: string;
+    cloudCoverage: number;
   }>;
+}
+
+// Provider score details
+export interface ProviderScore {
+  provider: string;
+  score: number;
+  status?: string;
+  reference?: string | null;
+  opportunities?: Array<{
+    windowId?: string;
+    startTime?: string;
+    endTime?: string;
+    offNadir?: number;
+  }>;
+}
+
+// Overall feasibility score
+export interface FeasibilityOverallScore {
+  feasibility: number;
+  weatherScore: {
+    weatherScore: number;
+    weatherDetails: WeatherDetails | null;
+  };
+  providerScore: {
+    score: number;
+    providerScores: ProviderScore[];
+  };
+}
+
+// Feasibility response - matches actual API response
+export interface FeasibilityResponse {
+  id: string;
+  validUntil: string;
+  overallScore: FeasibilityOverallScore;
 }
 
 // ==================== Orders ====================

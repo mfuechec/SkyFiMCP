@@ -33,4 +33,13 @@ coverage/
 # pnpm
 pnpm-debug.log
 
-SkyFyMCP-MF.pem
+# SSH keys
+*.pem
+*.key
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Task Master state (optional - uncomment if you don't want to track tasks in git)
+# .taskmaster/state.json
+# .taskmaster/tasks/tasks.json

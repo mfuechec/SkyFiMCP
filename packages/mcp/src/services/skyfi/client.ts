@@ -90,9 +90,13 @@ export class SkyFiClient {
       }
     );
 
-    // Add response interceptor for error handling
+    // Add response interceptor for error handling and logging
     this.client.interceptors.response.use(
-      (response) => response,
+      (response) => {
+        // Log successful responses for debugging
+        console.log(`[SkyFi API] Response ${response.status}:`, JSON.stringify(response.data, null, 2));
+        return response;
+      },
       (error: AxiosError<SkyFiApiError>) => {
         return this.handleError(error);
       }
@@ -202,15 +206,66 @@ export class SkyFiClient {
 
   /**
    * Check if an order is feasible
+   * This creates a feasibility request and polls for results
    */
-  async checkFeasibility(request: FeasibilityRequest): Promise<FeasibilityResponse> {
-    return this.withRetry(async () => {
+  async checkFeasibility(request: FeasibilityRequest, maxPollAttempts: number = 10, pollInterval: number = 3000): Promise<FeasibilityResponse> {
+    // Create the feasibility request
+    const createResponse = await this.withRetry(async () => {
       const response = await this.client.post<FeasibilityResponse>(
         '/feasibility',
         request
       );
       return response.data;
     });
+
+    const feasibilityId = createResponse.id;
+
+    // Helper to check if response is complete
+    const isComplete = (response: FeasibilityResponse): boolean => {
+      const providerScores = response.overallScore.providerScore.providerScores;
+
+      // No providers yet - still waiting
+      if (providerScores.length === 0) {
+        return false;
+      }
+
+      // Check if all providers have finished (COMPLETE or ERROR status)
+      const allProvidersFinished = providerScores.every(
+        p => p.status === 'COMPLETE' || p.status === 'ERROR'
+      );
+
+      // Check if we have actual opportunities
+      const hasOpportunities = providerScores.some(
+        p => p.opportunities && p.opportunities.length > 0
+      );
+
+      // Check if overall score is calculated (not -1)
+      const hasScore = response.overallScore.feasibility !== -1;
+
+      return allProvidersFinished || hasOpportunities || hasScore;
+    };
+
+    // If already complete, return immediately
+    if (isComplete(createResponse)) {
+      return createResponse;
+    }
+
+    // Poll for results
+    for (let attempt = 1; attempt <= maxPollAttempts; attempt++) {
+      await this.sleep(pollInterval);
+
+      const statusResponse = await this.getFeasibilityStatus(feasibilityId);
+
+      // Check if complete
+      if (isComplete(statusResponse)) {
+        return statusResponse;
+      }
+
+      console.log(`[SkyFi API] Feasibility poll ${attempt}/${maxPollAttempts} - still pending...`);
+    }
+
+    // Return the last response even if still pending
+    return this.getFeasibilityStatus(feasibilityId);
   }
 
   /**

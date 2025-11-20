@@ -18,45 +18,57 @@ import { geoJSONToWKT } from '../services/skyfi/types.js';
 // ==================== Helper Functions ====================
 
 /**
- * Convert numeric resolution to API string enum array
- * Returns an array with appropriate resolution levels based on input
+ * Convert numeric resolution to API string enum
+ * Returns a single resolution string with proper formatting (spaces, not underscores)
+ * Valid values: LOW, MEDIUM, HIGH, VERY HIGH, SUPER HIGH, ULTRA HIGH, CM 30, CM 50
  */
-function convertResolutionToEnumArray(resolution: string | number): string[] {
-  // Valid resolution enum values (with underscores as per API spec)
-  const validEnums = ['MEDIUM', 'HIGH', 'VERY_HIGH'];
+function convertResolutionToEnum(resolution: string | number): string {
+  // Valid resolution enum values (with spaces as per API spec)
+  const validEnums = ['LOW', 'MEDIUM', 'HIGH', 'VERY HIGH', 'SUPER HIGH', 'ULTRA HIGH', 'CM 30', 'CM 50'];
 
-  // If already a valid string enum, return as array
+  // If already a valid string enum, normalize and return
   if (typeof resolution === 'string') {
-    // Normalize: replace spaces with underscores and uppercase
-    const normalized = resolution.toUpperCase().replace(/\s+/g, '_');
+    // Normalize: replace underscores with spaces and uppercase
+    const normalized = resolution.toUpperCase().replace(/_/g, ' ').trim();
+
+    // Check if it's a valid enum
     if (validEnums.includes(normalized)) {
-      return [normalized];
+      return normalized;
     }
+
     // Try to parse as number
     const num = parseFloat(resolution);
     if (!isNaN(num)) {
       resolution = num;
     } else {
-      throw new Error(`Invalid resolution: "${resolution}". Must be numeric (0.5, 1, 2, 5) or one of: ${validEnums.join(', ')}`);
+      // Default to VERY HIGH for unknown strings
+      return 'VERY HIGH';
     }
   }
 
-  // Convert numeric to appropriate resolution levels
-  // Return array with resolutions that can achieve the requested GSD
+  // Convert numeric GSD (meters) to appropriate resolution level
   if (typeof resolution === 'number') {
-    if (resolution <= 1) {
-      // High resolution request - include all levels that could work
-      return ['VERY_HIGH'];
+    if (resolution <= 0.3) {
+      return 'CM 30';
+    } else if (resolution <= 0.5) {
+      return 'CM 50';
+    } else if (resolution <= 0.75) {
+      return 'ULTRA HIGH';
+    } else if (resolution <= 1) {
+      return 'SUPER HIGH';
+    } else if (resolution <= 1.5) {
+      return 'VERY HIGH';
     } else if (resolution <= 3) {
-      return ['VERY_HIGH', 'HIGH'];
+      return 'HIGH';
     } else if (resolution <= 5) {
-      return ['HIGH', 'MEDIUM'];
+      return 'MEDIUM';
     } else {
-      return ['MEDIUM'];
+      return 'LOW';
     }
   }
 
-  throw new Error(`Invalid resolution type: ${typeof resolution}`);
+  // Default fallback
+  return 'VERY HIGH';
 }
 
 /**
@@ -76,6 +88,45 @@ function convertDateToISO(date: string): string {
 
   // Return in ISO format with UTC timezone
   return parsed.toISOString().replace('.000Z', '+00:00');
+}
+
+/**
+ * Validate that start date is within 14 days of today (API constraint)
+ */
+function validateStartDateConstraint(startDate: string): { valid: boolean; message?: string; suggestion?: string } {
+  const start = new Date(startDate);
+  const now = new Date();
+  const fourteenDaysFromNow = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+
+  if (start > fourteenDaysFromNow) {
+    const suggestedStart = new Date(now.getTime() + 1 * 24 * 60 * 60 * 1000); // Tomorrow
+    return {
+      valid: false,
+      message: `Start date must be within 14 days of today. "${startDate}" is too far in the future.`,
+      suggestion: `Use a start date like "${suggestedStart.toISOString().split('T')[0]}" (tomorrow) and extend the end date for a longer capture window.`,
+    };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Check if capture window is short and provide guidance
+ */
+function analyzeWindowDuration(startDate: string, endDate: string): { short: boolean; days: number; suggestion?: string } {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const days = Math.ceil((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
+
+  if (days < 7) {
+    return {
+      short: true,
+      days,
+      suggestion: `Your capture window is only ${days} day(s). Consider extending to 30-60 days for more capture opportunities.`,
+    };
+  }
+
+  return { short: false, days };
 }
 
 /**
@@ -244,7 +295,16 @@ const checkOrderFeasibilityDefinition = {
   name: 'check_order_feasibility',
   description: `Check if a satellite imagery tasking order is feasible for a given location and time window.
 
-ALL PARAMETERS ARE REQUIRED.
+IMPORTANT API CONSTRAINTS:
+- Start date MUST be within 14 days of today (API rejects dates further out)
+- Longer capture windows (1-2 months) yield more opportunities
+- SAR imagery has weather score 1.0 (unaffected by clouds) - best for guaranteed capture
+- UMBRA provider specializes in SAR; PLANET in optical imagery
+
+BEST PRACTICES:
+- Use SAR + HIGH resolution for reliable feasibility (typically 0.95 score, 30+ opportunities)
+- Extend end date to 1-2 months for maximum capture windows
+- For optical (DAY), check weather forecast - poor weather will reduce feasibility
 
 Location format:
 - Coordinates: "37.7749,-122.4194" (latitude,longitude)
@@ -401,12 +461,34 @@ async function checkOrderFeasibilityHandler(
     // Parse location to WKT
     const aoi = parseLocationToWKT(locationInput);
 
-    // Convert resolution to API enum array format
-    const resolution = convertResolutionToEnumArray(resolutionInput);
+    // Convert resolution to API enum string format (with spaces)
+    const resolution = convertResolutionToEnum(resolutionInput);
 
     // Convert dates to ISO 8601 with timezone
     const startDate = convertDateToISO(startDateInput);
     const endDate = convertDateToISO(endDateInput);
+
+    // Validate start date is within 14 days (API constraint)
+    const startDateValidation = validateStartDateConstraint(startDateInput);
+    if (!startDateValidation.valid) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              error: 'DATE_CONSTRAINT_ERROR',
+              message: startDateValidation.message,
+              suggestion: startDateValidation.suggestion,
+              tip: 'The SkyFi API only allows scheduling tasking orders up to 14 days in advance. Use a longer end date window instead.',
+            }),
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    // Analyze window duration and prepare warning if too short
+    const windowAnalysis = analyzeWindowDuration(startDateInput, endDateInput);
 
     // Build the feasibility request with all required fields
     const feasibilityRequest: FeasibilityRequest = {
@@ -428,50 +510,131 @@ async function checkOrderFeasibilityHandler(
 
     const response: FeasibilityResponse = await client.checkFeasibility(feasibilityRequest);
 
-    // Format the response with detailed information
-    if (response.feasible) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              success: true,
-              feasibility: {
-                feasible: true,
-                message: 'Order is feasible and can be processed',
-                feasibilityId: response.feasibilityId,
-                passPredictions: response.passPredictions,
-              },
-            }, null, 2),
-          },
-        ],
-      };
-    } else {
-      // Provide detailed error messaging for infeasible orders
-      const infeasibilityDetails = formatInfeasibilityDetails(
-        response.reason,
-        response.alternatives,
-        args
-      );
+    // Determine if feasible based on scores
+    const feasibilityScore = response.overallScore.feasibility;
+    const weatherScore = response.overallScore.weatherScore.weatherScore;
+    const providerScores = response.overallScore.providerScore.providerScores;
 
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              success: true,
-              feasibility: {
-                feasible: false,
-                reason: response.reason,
-                detailedExplanation: infeasibilityDetails.explanation,
-                suggestions: infeasibilityDetails.suggestions,
-                alternatives: response.alternatives,
-              },
-            }, null, 2),
-          },
-        ],
-      };
+    // Check if any providers have positive scores or opportunities
+    const hasProviderOpportunities = providerScores.some(
+      p => p.score > 0 || (p.opportunities && p.opportunities.length > 0)
+    );
+
+    // Consider feasible if overall score > 0 or if we have provider opportunities
+    const isFeasible = feasibilityScore > 0 || hasProviderOpportunities;
+
+    // Format the response with actual API data
+    const formattedResponse: Record<string, unknown> = {
+      success: true,
+      feasibility: {
+        feasible: isFeasible,
+        feasibilityId: response.id,
+        validUntil: response.validUntil,
+        scores: {
+          overall: feasibilityScore,
+          weather: weatherScore,
+          provider: response.overallScore.providerScore.score,
+        },
+        windowDuration: `${windowAnalysis.days} days`,
+        weatherDetails: response.overallScore.weatherScore.weatherDetails,
+        providers: providerScores.map(p => ({
+          provider: p.provider,
+          score: p.score,
+          status: p.status,
+          opportunityCount: p.opportunities?.length || 0,
+          opportunities: p.opportunities || [],
+        })),
+      },
+    };
+
+    // Add window duration warning if applicable
+    if (windowAnalysis.short) {
+      (formattedResponse.feasibility as Record<string, unknown>).windowWarning = windowAnalysis.suggestion;
     }
+
+    // Add interpretation message
+    if (isFeasible) {
+      const totalOpportunities = providerScores.reduce(
+        (sum, p) => sum + (p.opportunities?.length || 0), 0
+      );
+      (formattedResponse.feasibility as Record<string, unknown>).message =
+        `Order is feasible with ${totalOpportunities} capture opportunity(s)`;
+
+      // Add recommendation for better results if window is short
+      if (windowAnalysis.short) {
+        (formattedResponse.feasibility as Record<string, unknown>).recommendation =
+          'Consider extending your capture window to 30-60 days for more opportunities and flexibility.';
+      }
+    } else {
+      // Determine reason for infeasibility
+      let reason = 'Order is not feasible';
+      const suggestions: string[] = [];
+
+      // Check for weather issues (only relevant for optical imagery)
+      const isOptical = ['DAY', 'NIGHT', 'VIDEO', 'STEREO', 'MULTISPECTRAL', 'HYPERSPECTRAL'].includes(productType);
+      if (isOptical && weatherScore < 0.3 && weatherScore >= 0) {
+        reason = 'Poor weather conditions expected for optical imagery';
+        suggestions.push('**Recommended: Use SAR imagery** - SAR has weather score 1.0 (unaffected by clouds)');
+        suggestions.push('SAR + HIGH resolution with UMBRA typically yields 30+ capture opportunities');
+        suggestions.push('If optical is required, try a different date range with better weather forecast');
+      }
+
+      // Check for short window
+      if (windowAnalysis.short) {
+        suggestions.push(`Extend capture window from ${windowAnalysis.days} days to 30-60 days for more opportunities`);
+      }
+
+      if (providerScores.length === 0) {
+        reason = 'No providers available for this configuration';
+        suggestions.push('Try SAR + HIGH resolution (reliably available from UMBRA)');
+        suggestions.push('Check pricing endpoint to see all available product/resolution combinations');
+      } else {
+        const errorProviders = providerScores.filter(p => p.status === 'ERROR');
+        if (errorProviders.length > 0) {
+          reason = `Provider(s) returned errors: ${errorProviders.map(p => p.provider).join(', ')}`;
+
+          // Suggest UMBRA for SAR if not already using it
+          if (productType === 'SAR' && !errorProviders.some(p => p.provider === 'UMBRA')) {
+            suggestions.push('Try specifying requiredProvider: "UMBRA" for SAR imagery');
+          } else if (isOptical) {
+            suggestions.push('**Recommended: Switch to SAR** - more reliable availability');
+          }
+
+          suggestions.push('Extend the date window to 30-60 days for more capture opportunities');
+        }
+      }
+
+      (formattedResponse.feasibility as Record<string, unknown>).reason = reason;
+      (formattedResponse.feasibility as Record<string, unknown>).suggestions = suggestions;
+
+      // Add a recommended alternative configuration
+      if (isOptical || providerScores.length === 0 || providerScores.every(p => p.status === 'ERROR')) {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const twoMonthsOut = new Date();
+        twoMonthsOut.setMonth(twoMonthsOut.getMonth() + 2);
+
+        (formattedResponse.feasibility as Record<string, unknown>).recommendedAlternative = {
+          description: 'High-reliability configuration based on tested API behavior',
+          productType: 'SAR',
+          resolution: 'HIGH',
+          provider: 'UMBRA',
+          startDate: tomorrow.toISOString().split('T')[0],
+          endDate: twoMonthsOut.toISOString().split('T')[0],
+          expectedScore: '~0.95',
+          expectedOpportunities: '30+',
+        };
+      }
+    }
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(formattedResponse, null, 2),
+        },
+      ],
+    };
   } catch (error) {
     if (error instanceof SkyFiApiException) {
       // Provide detailed error messaging for API errors
@@ -513,68 +676,6 @@ async function checkOrderFeasibilityHandler(
 }
 
 // ==================== Helper Functions ====================
-
-/**
- * Format detailed explanation for infeasible orders
- */
-function formatInfeasibilityDetails(
-  reason: string | undefined,
-  alternatives: string[] | undefined,
-  args: Record<string, unknown>
-): { explanation: string; suggestions: string[] } {
-  const suggestions: string[] = [];
-  let explanation = reason || 'Order cannot be fulfilled';
-
-  // Analyze the reason and provide specific guidance
-  if (reason) {
-    const lowerReason = reason.toLowerCase();
-
-    if (lowerReason.includes('resolution')) {
-      explanation = `The requested resolution is not available for this location or provider.`;
-      suggestions.push('Try a different resolution (e.g., 1m instead of 0.5m)');
-      suggestions.push('Consider using a different imagery provider');
-    } else if (lowerReason.includes('location') || lowerReason.includes('coverage')) {
-      explanation = `The requested location is not covered by available satellite passes.`;
-      suggestions.push('Expand the search area');
-      suggestions.push('Try a different date range');
-      suggestions.push('Consider archive imagery instead of new tasking');
-    } else if (lowerReason.includes('date') || lowerReason.includes('time')) {
-      explanation = `The requested capture date is not feasible.`;
-      suggestions.push('Choose a later date to allow for satellite scheduling');
-      suggestions.push('Check archive for existing imagery');
-    } else if (lowerReason.includes('weather') || lowerReason.includes('cloud')) {
-      explanation = `Weather conditions prevent reliable imagery capture.`;
-      suggestions.push('Try SAR imagery which can penetrate clouds');
-      suggestions.push('Choose a different time period with better weather forecast');
-    } else if (lowerReason.includes('capacity') || lowerReason.includes('busy')) {
-      explanation = `Satellite capacity is fully booked for the requested period.`;
-      suggestions.push('Try a different date range');
-      suggestions.push('Consider lower priority delivery');
-    } else if (lowerReason.includes('area') || lowerReason.includes('size')) {
-      explanation = `The requested area of interest is outside acceptable bounds.`;
-      suggestions.push('Check minimum area requirements');
-      suggestions.push('Adjust polygon boundaries');
-    }
-  }
-
-  // Add suggestions based on request parameters
-  if (args.resolution && (args.resolution as number) < 0.5) {
-    suggestions.push('Very high resolution (<0.5m) has limited provider availability');
-  }
-
-  // Add alternative-based suggestions
-  if (alternatives && alternatives.length > 0) {
-    suggestions.push(`Consider these alternatives: ${alternatives.join(', ')}`);
-  }
-
-  // Default suggestions if none were added
-  if (suggestions.length === 0) {
-    suggestions.push('Contact support for more information');
-    suggestions.push('Try adjusting your request parameters');
-  }
-
-  return { explanation, suggestions };
-}
 
 /**
  * Format detailed troubleshooting info for API errors
@@ -637,6 +738,5 @@ export function registerPricingTools(): void {
 export {
   getPricingEstimateHandler,
   checkOrderFeasibilityHandler,
-  formatInfeasibilityDetails,
   formatApiErrorDetails,
 };

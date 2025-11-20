@@ -81,6 +81,9 @@ async function main() {
     const app = express();
     const port = parseInt(process.env.PORT || '3000', 10);
 
+    // Note: Don't use express.json() globally - the MCP SDK's SSEServerTransport
+    // needs to read the raw request body stream itself
+
     // Single transport for simplicity (supports one client at a time)
     let activeTransport: SSEServerTransport | null = null;
 
@@ -118,13 +121,14 @@ async function main() {
       console.log('POST /message received');
 
       if (!activeTransport) {
-        console.log('No active transport');
-        res.status(404).json({ error: 'No active session' });
+        console.log('No active transport - client must connect to /sse first');
+        res.status(404).json({ error: 'No active session. Connect to /sse first.' });
         return;
       }
 
       try {
         await activeTransport.handlePostMessage(req, res);
+        console.log('Message handled successfully');
       } catch (error) {
         console.error('Error handling message:', error);
         if (!res.headersSent) {
