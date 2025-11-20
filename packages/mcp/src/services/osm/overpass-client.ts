@@ -29,7 +29,7 @@ export class OverpassClient {
    * Build Overpass QL query for feature search
    */
   private buildQuery(request: FeatureSearchRequest): string {
-    const { featureType, boundingBox, center, radiusKm, limit, tags } = request;
+    const { featureType, boundingBox, center, radiusKm, tags } = request;
 
     let query = '[out:json][timeout:25];';
 
