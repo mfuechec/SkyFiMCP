@@ -15,16 +15,19 @@
   },
   "dependencies": {
     "@skyfi-mcp/shared": "workspace:*",
-    "express": "^4.18.2",
-    "express-rate-limit": "^8.2.1",
     "axios": "^1.6.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
+    "eventsource": "^4.1.0",
+    "express": "^4.18.2",
+    "express-rate-limit": "^8.2.1",
+    "openai": "^6.9.1",
     "zod": "^3.22.4"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
     "@types/cors": "^2.8.17",
+    "@types/eventsource": "^3.0.0",
+    "@types/express": "^4.17.21",
     "@types/node": "^20.10.0",
     "tsx": "^4.6.0",
     "typescript": "^5.3.0",
