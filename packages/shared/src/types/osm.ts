@@ -84,3 +84,22 @@ export interface FeatureSearchResult {
   features: OSMFeature[];
   totalCount: number;
 }
+
+// Map visualization types for OSM features
+export interface OSMMapFeature {
+  id: string;
+  name: string;
+  type: string;
+  lat: number;
+  lon: number;
+  tags: Record<string, string>;
+  featureType?: string; // warehouse, building, etc.
+}
+
+export interface OSMFeatureLayer {
+  id: string;
+  name: string;
+  features: OSMMapFeature[];
+  visible: boolean;
+  color?: string;
+}

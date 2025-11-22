@@ -12,6 +12,7 @@ import type {
   SkyFiClientConfig,
   SearchArchiveRequest,
   SearchArchiveResponse,
+  ArchiveResult,
   PricingRequest,
   PricingResponse,
   FeasibilityResponse,
@@ -184,6 +185,33 @@ export class SkyFiClient {
       const response = await this.client.post<SearchArchiveResponse>(
         '/archives',
         request
+      );
+      return response.data;
+    });
+  }
+
+  /**
+   * Get next page of archive search results using pagination hash
+   */
+  async getArchivesPage(pageHash: string): Promise<SearchArchiveResponse> {
+    return this.withRetry(async () => {
+      const response = await this.client.get<SearchArchiveResponse>(
+        '/archives',
+        {
+          params: { page: pageHash }
+        }
+      );
+      return response.data;
+    });
+  }
+
+  /**
+   * Get detailed information for a specific archive by ID
+   */
+  async getArchive(archiveId: string): Promise<ArchiveResult> {
+    return this.withRetry(async () => {
+      const response = await this.client.get<ArchiveResult>(
+        `/archives/${archiveId}`
       );
       return response.data;
     });

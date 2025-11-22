@@ -3,19 +3,29 @@ import express from 'express';
 import cors from 'cors';
 import { isValidCoordinate } from '@skyfi-mcp/shared';
 import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 import dotenv from 'dotenv';
 import axios from 'axios';
+import { randomUUID } from 'crypto';
 import { mcpClient, convertMCPToolToOpenAI } from './mcp-client.js';
+import { searchContextService } from './services/search-context.service.js';
 
 dotenv.config({ path: '../../.env' });
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Initialize OpenAI
-const openai = new OpenAI({
+// Initialize AI clients
+console.log('🔑 ANTHROPIC_API_KEY loaded:', !!process.env.ANTHROPIC_API_KEY);
+const anthropic = process.env.ANTHROPIC_API_KEY ? new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+}) : null;
+console.log('🤖 Anthropic client initialized:', !!anthropic);
+
+const openai = process.env.OPENAI_API_KEY ? new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-});
+}) : null;
+console.log('🤖 OpenAI client initialized:', !!openai);
 
 // SSE clients management
 const sseClients = new Set<express.Response>();
@@ -124,13 +134,30 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ error: 'Messages array is required' });
     }
 
-    // Frontend-specific tools (map control)
+    // Session management for search context
+    const sessionId = req.headers['x-session-id'] as string || randomUUID();
+    const currentQuery = messages[messages.length - 1]?.text || '';
+
+    // Retrieve existing search context
+    let searchContext = await searchContextService.getContext(sessionId);
+    console.log('🔍 Search context:', searchContext ? 'Found existing context' : 'No existing context');
+
+    // Frontend-specific tools (map control and OSM visualization)
     const frontendTools = [
       {
         type: 'function',
         function: {
           name: 'recenter_map',
-          description: 'Recenters the map view to a specific geographic location. Use this when the user asks to see, view, or navigate to a location. Always provide exact coordinates - use geocoding or your knowledge of city/landmark coordinates. The map will smoothly pan to center on the provided coordinates.',
+          description: `WHEN TO USE: Call this EVERY TIME the user mentions ANY location, place, region, or geographic area (e.g., "show Africa", "Paris", "drought areas", "that region").
+
+WHAT IT DOES: Moves the map's center view to the specified coordinates. This is REQUIRED before adding markers so the user can see them.
+
+IMPORTANT:
+- Use your geographic knowledge to convert ANY place name to precise lat/lng coordinates
+- For broad regions (continents, "drought areas"), choose a central coordinate
+- Examples: "Africa" → (5, 35), "Paris" → (48.86, 2.35), "Horn of Africa" → (10, 45)
+
+ALWAYS call this when changing locations - don't assume the map is already there.`,
           parameters: {
             type: 'object',
             properties: {
@@ -155,7 +182,18 @@ app.post('/api/chat', async (req, res) => {
         type: 'function',
         function: {
           name: 'set_zoom',
-          description: 'Adjusts the map zoom level to show more or less detail. Use after recentering to provide the appropriate view for the context: zoom 1-4 for continents/regions, 5-8 for countries, 9-12 for cities, 13-15 for neighborhoods, 16-18 for streets. Higher zoom = more detail.',
+          description: `WHEN TO USE: Call this AFTER recenter_map to set the appropriate viewing scale.
+
+WHAT IT DOES: Adjusts how zoomed in/out the map view is to show the right level of detail.
+
+ZOOM LEVEL GUIDE (choose based on geographic scale):
+- 3-5: Continents, large regions (e.g., "Africa", "Middle East")
+- 6-8: Countries, large states (e.g., "Kenya", "Texas")
+- 10-12: Cities, metro areas (e.g., "Paris", "San Francisco")
+- 13-15: Neighborhoods, districts
+- 16-18: Street level
+
+ALWAYS call this after recenter_map - it completes the navigation action.`,
           parameters: {
             type: 'object',
             properties: {
@@ -171,62 +209,89 @@ app.post('/api/chat', async (req, res) => {
       {
         type: 'function',
         function: {
-          name: 'add_marker',
-          description: 'Places an interactive marker pin on the map at a specific location with rich information. Use this to highlight points of interest, locations being discussed, or areas relevant to satellite imagery. Multiple markers can be added - each appears as a clickable pin with a popup showing details. When showing multiple related locations (e.g., "drought regions in Africa"), call this function multiple times with different coordinates.',
+          name: 'draw_rectangle',
+          description: `WHEN TO USE:
+- ALWAYS call after recenter_map to mark the Area of Interest (AOI) you're showing
+- Draw rectangles for specific geographic areas where the user wants satellite imagery
+- Each rectangle represents an AOI that can be used for orders, monitoring, and pricing
+
+WHAT IT DOES: Draws a resizable rectangle on the map representing an Area of Interest (AOI). The rectangle's coordinates are automatically stored and used for satellite imagery orders, feasibility checks, and monitoring.
+
+IMPORTANT:
+- The rectangle bounds define the AOI that will be used for all subsequent satellite operations (pricing, orders, monitoring)
+- Create reasonable-sized rectangles based on the location type:
+  * City/neighborhood: ~0.05° x 0.05° (~5km x 5km)
+  * Region/district: ~0.2° x 0.2° (~20km x 20km)
+  * Large area: ~0.5° x 0.5° (~50km x 50km)
+
+Example for San Francisco:
+- Center: 37.7749, -122.4194
+- Rectangle bounds: [[37.75, -122.45], [37.80, -122.39]]  // [[south, west], [north, east]]
+
+These coordinates will be automatically used when the user asks for pricing, feasibility checks, or orders for this location.`,
           parameters: {
             type: 'object',
             properties: {
               name: {
                 type: 'string',
-                description: 'Primary label for this location that appears on the marker tooltip and popup header (e.g., "Port of Rotterdam", "Sahel Region", "Mount Vesuvius")'
+                description: 'Name of this Area of Interest (e.g., "San Francisco Downtown", "Construction Site", "Agricultural Area")'
               },
-              latitude: {
-                type: 'number',
-                description: 'Latitude coordinate in decimal degrees where the marker should be placed (-90 to 90)'
-              },
-              longitude: {
-                type: 'number',
-                description: 'Longitude coordinate in decimal degrees where the marker should be placed (-180 to 180)'
+              bounds: {
+                type: 'array',
+                description: 'Rectangle bounds as [[south, west], [north, east]] coordinates. Example: [[37.75, -122.45], [37.80, -122.39]]',
+                items: {
+                  type: 'array',
+                  items: { type: 'number' },
+                  minItems: 2,
+                  maxItems: 2
+                },
+                minItems: 2,
+                maxItems: 2
               },
               description: {
                 type: 'string',
-                description: 'A brief but informative description of this location, its significance, or current status. This appears in the marker popup and helps users understand why this location matters.'
+                description: 'Description of this AOI and what the user wants to monitor or capture'
               },
               category: {
                 type: 'string',
-                description: 'Type or category of this location for context and potential future filtering (e.g., "port", "canal", "airport", "city", "volcano", "drought area", "conflict zone", "industrial site")'
+                description: 'Category of this AOI (e.g., "urban", "construction", "agriculture", "infrastructure")'
               },
               additionalInfo: {
                 type: 'object',
-                description: 'Optional structured data providing deeper context about this location. Include relevant metrics, statistics, or characteristics that help understand the location\'s importance.',
-                properties: {
-                  tradeVolume: { type: 'string', description: 'Trade or shipping volume if applicable' },
-                  keyRoutes: { type: 'array', items: { type: 'string' }, description: 'Important routes or connections' },
-                  importance: { type: 'string', description: 'Strategic or economic importance' },
-                  population: { type: 'string', description: 'Population if applicable' },
-                  capacity: { type: 'string', description: 'Capacity or throughput metrics' },
-                  status: { type: 'string', description: 'Current operational status or condition' }
-                }
+                description: 'Optional additional context about this AOI'
               },
               satelliteInfo: {
                 type: 'object',
-                description: 'Satellite imagery information for this location. Include actual data from MCP tools when available, or omit if not yet fetched.',
+                description: 'Satellite imagery information. Include data from MCP tool calls.',
                 properties: {
-                  available: { type: 'boolean', description: 'Whether satellite imagery is available for this location' },
-                  estimatedCost: { type: 'string', description: 'Cost estimate from get_pricing_estimate if available (e.g., "$8 per km²")' },
-                  resolution: { type: 'string', description: 'Available imagery resolution (e.g., "30cm", "1m", "10m")' }
+                  available: { type: 'boolean' },
+                  estimatedCost: { type: 'string' },
+                  resolution: { type: 'string' },
+                  monitoringActive: { type: 'boolean' }
                 }
               }
             },
-            required: ['name', 'latitude', 'longitude', 'description']
+            required: ['name', 'bounds', 'description']
           }
         }
       },
       {
         type: 'function',
         function: {
-          name: 'clear_markers',
-          description: 'Removes all existing markers from the map to provide a clean slate. IMPORTANT: Always use this when the user asks about a NEW topic or location that is unrelated to previous markers. For example, if markers show "drought in Africa" and the user then asks "show me Ukraine", call clear_markers first. However, NEVER call this alone - always immediately follow with add_marker calls for the new topic.',
+          name: 'clear_rectangles',
+          description: `WHEN TO USE: Call this FIRST when the user asks about a DIFFERENT location than what's currently shown.
+
+WHAT IT DOES: Removes all existing AOI rectangles from the map for a clean slate.
+
+TRIGGER EXAMPLES:
+- Current AOI shows "San Francisco", user asks "show me New York" → clear_rectangles first
+- User asks for completely different location → clear_rectangles first
+- User asks follow-up about same AOI → DON'T clear
+
+CRITICAL: ALWAYS follow with:
+1. recenter_map (to new location)
+2. draw_rectangle (for the new AOI)
+3. set_zoom`,
           parameters: {
             type: 'object',
             properties: {}
@@ -236,41 +301,150 @@ app.post('/api/chat', async (req, res) => {
       {
         type: 'function',
         function: {
-          name: 'update_marker',
-          description: 'Updates an existing marker on the map by adding or modifying information. Use this to enhance markers with monitoring status, satellite data, or other additional information after the marker has been created. For example, after setting up monitoring for a location, call this to add the monitor ID to the existing marker.',
+          name: 'update_rectangle',
+          description: `WHEN TO USE: Call this to ADD information to an existing AOI rectangle after you've called MCP tools.
+
+WHAT IT DOES: Updates a rectangle that's already on the map with new data (pricing, monitoring status, satellite info).
+
+COMMON USE CASES:
+1. After calling get_pricing_estimate → update_rectangle with satelliteInfo.estimatedCost
+2. After calling create_monitor → update_rectangle with satelliteInfo.monitoringActive=true
+3. After calling check_order_feasibility → update_rectangle with satelliteInfo.available
+
+IMPORTANT: The rectangle must already exist (from draw_rectangle). Use exact same name.
+
+Example flow:
+1. draw_rectangle("San Francisco", [[37.75, -122.45], [37.80, -122.39]], "Downtown area")
+2. get_pricing_estimate(location="37.775,-122.42") → returns "$8/km²"
+3. update_rectangle(name="San Francisco", satelliteInfo={estimatedCost: "$8/km²"})`,
           parameters: {
             type: 'object',
             properties: {
               name: {
                 type: 'string',
-                description: 'The name of the marker to update (must exactly match an existing marker\'s name, e.g., "Avdiivka, Ukraine")'
+                description: 'The name of the rectangle to update (must exactly match an existing rectangle\'s name)'
               },
               additionalInfo: {
                 type: 'object',
-                description: 'Additional information to merge into the marker\'s existing additionalInfo. New fields are added, existing fields are updated.',
+                description: 'Additional information to merge',
                 properties: {
-                  monitoring: { type: 'string', description: 'Monitoring status (e.g., "Active", "Inactive")' },
-                  monitorId: { type: 'string', description: 'Monitor ID from create_monitor' },
-                  monitorType: { type: 'string', description: 'Type of monitoring (e.g., "VIDEO", "DAY", "SAR")' },
-                  createdAt: { type: 'string', description: 'When monitoring was set up' }
+                  monitoring: { type: 'string' },
+                  monitorId: { type: 'string' },
+                  monitorType: { type: 'string' },
+                  createdAt: { type: 'string' }
                 }
               },
               satelliteInfo: {
                 type: 'object',
-                description: 'Satellite information to merge into the marker\'s existing satelliteInfo',
+                description: 'Satellite information to merge',
                 properties: {
                   available: { type: 'boolean' },
                   estimatedCost: { type: 'string' },
                   resolution: { type: 'string' },
-                  monitoringActive: { type: 'boolean', description: 'Whether active monitoring is configured' }
+                  monitoringActive: { type: 'boolean' }
                 }
               },
               description: {
                 type: 'string',
-                description: 'Updated description for the marker (replaces the existing description)'
+                description: 'Updated description'
               }
             },
             required: ['name']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'draw_osm_features',
+          description: `WHEN TO USE: Call this IMMEDIATELY after using OSM MCP tools (osm_geocode, osm_search_features, osm_find_features_nearby).
+
+WHAT IT DOES: Displays OSM features (buildings, warehouses, etc.) as markers on the map.
+
+CRITICAL WORKFLOW:
+1. User asks to "find warehouses in Austin" → osm_search_features or osm_find_features_nearby
+2. MCP returns feature data → IMMEDIATELY call draw_osm_features to visualize
+3. Markers appear on map with popups showing details
+
+IMPORTANT:
+- This bridges OSM data to map visualization
+- Call this for EVERY OSM search result to make features visible
+- Each feature becomes a clickable marker
+- Without this, OSM search results are invisible to the user
+
+Example flow:
+1. osm_find_features_nearby(lat=30.27, lon=-97.74, featureType="warehouse", radiusKm=5)
+2. Returns 12 warehouses
+3. draw_osm_features(features=[...12 warehouses...]) ← REQUIRED!
+4. User sees 12 markers on map`,
+          parameters: {
+            type: 'object',
+            properties: {
+              features: {
+                type: 'array',
+                description: 'Array of OSM features to display on the map',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string', description: 'Unique feature ID' },
+                    name: { type: 'string', description: 'Feature name' },
+                    type: { type: 'string', description: 'OSM type (node/way/relation)' },
+                    lat: { type: 'number', description: 'Latitude' },
+                    lon: { type: 'number', description: 'Longitude' },
+                    tags: { type: 'object', description: 'OSM tags' },
+                    featureType: { type: 'string', description: 'Feature type (warehouse, building, etc.)' }
+                  },
+                  required: ['id', 'name', 'type', 'lat', 'lon', 'tags']
+                }
+              }
+            },
+            required: ['features']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'clear_osm_features',
+          description: `WHEN TO USE: Call this when starting a NEW OSM search in a different location.
+
+WHAT IT DOES: Removes all OSM feature markers from the map.
+
+USE CASES:
+- User searches for warehouses in Austin, then asks for warehouses in Dallas → clear_osm_features first
+- User wants to start fresh → clear_osm_features
+- Switching from one feature type to another → clear_osm_features
+
+DON'T USE:
+- When adding more results to existing search
+- When refining current search`,
+          parameters: {
+            type: 'object',
+            properties: {}
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'highlight_osm_feature',
+          description: `WHEN TO USE: Focus the map on a specific OSM feature by its ID.
+
+WHAT IT DOES: Centers and zooms the map to show a specific feature.
+
+USE CASES:
+- User asks "show me warehouse #3" → highlight_osm_feature(featureId="way/12345")
+- "Focus on the largest building" → highlight_osm_feature(featureId="...")
+- User wants detailed view of specific feature`,
+          parameters: {
+            type: 'object',
+            properties: {
+              featureId: {
+                type: 'string',
+                description: 'ID of the OSM feature to highlight (format: "type/id" e.g. "way/12345")'
+              }
+            },
+            required: ['featureId']
           }
         }
       }
@@ -289,13 +463,15 @@ app.post('/api/chat', async (req, res) => {
     const dataActionKeywords = ['pric', 'cost', 'how much', 'feasib', 'available', 'order', 'estimate'];
     const setupKeywords = ['monitor', 'track', 'watch', 'set up', 'create', 'start'];
     const capabilityKeywords = ['could i', 'can i', 'is it possible', 'able to', 'possible to'];
+    const imageryKeywords = ['satellite', 'imagery', 'image', 'capture', 'photo', 'sar', 'optical'];
 
     // Negative keywords that indicate conversational queries (not actions)
-    const conversationalKeywords = ['how to', 'what is', 'tell me about', 'explain', 'help me understand', 'what can you'];
+    const conversationalKeywords = ['how to', 'what is', 'tell me about', 'explain', 'what can you'];
+    // Note: "help me understand" and "help me find" are different - "help me find" is action-oriented
 
     // Location detection patterns
     const hasCoordinates = /[-]?\d+\.\d+[,\s]+[-]?\d+\.\d+/.test(userMessage);
-    const hasLocationPhrase = /\b(for|in|at|over|near)\s+[A-Z]/.test(messages[messages.length - 1]?.text || '');
+    const hasLocationPhrase = /\b(for|in|at|over|near)\s+[a-zA-Z]/.test(messages[messages.length - 1]?.text || '');
 
     // Calculate confidence score (0.0 to 1.0)
     let confidence = 0;
@@ -314,6 +490,12 @@ app.post('/api/chat', async (req, res) => {
       console.log('⚙️ Setup keyword detected');
     }
 
+    // Strong boost for satellite imagery queries
+    if (imageryKeywords.some(kw => userMessage.includes(kw))) {
+      confidence += 0.5;
+      console.log('🛰️ Satellite imagery keyword detected');
+    }
+
     // Add confidence for location mentions
     if (hasCoordinates || hasLocationPhrase) {
       confidence += 0.3;
@@ -328,8 +510,9 @@ app.post('/api/chat', async (req, res) => {
       }
     }
 
-    // Penalize conversational markers
-    if (conversationalKeywords.some(kw => userMessage.includes(kw))) {
+    // Penalize conversational markers (but don't penalize "help me [action]")
+    const hasHelpMeAction = /help me (find|get|locate|search|order)/.test(userMessage);
+    if (conversationalKeywords.some(kw => userMessage.includes(kw)) && !hasHelpMeAction) {
       confidence -= 0.6;
       console.log('💬 Conversational query detected - reducing confidence');
     }
@@ -341,84 +524,246 @@ app.post('/api/chat', async (req, res) => {
     const toolChoice = shouldForceTools ? 'required' : 'auto';
     console.log(`🎯 Tool choice: ${toolChoice} (confidence: ${confidence.toFixed(2)})`);
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',  // Upgraded from gpt-4o-mini for reliable tool calling
-      messages: [
-        {
-          role: 'system',
-          content: `You are a helpful SkyFi satellite imagery assistant.
+    // System prompt
+    const systemPrompt = `You are a SkyFi satellite imagery assistant with integrated OpenStreetMap (OSM) capabilities. Help users find locations, define Areas of Interest (AOIs), check satellite imagery pricing, and order imagery.
 
-CRITICAL RULE - NO FABRICATED DATA:
-❌ NEVER include pricing, costs, resolution, or availability in add_marker unless you FIRST called the appropriate MCP tool
-❌ NEVER provide estimated costs, availability status, or satellite specifications from your training data
-✅ ALWAYS call get_pricing_estimate or check_order_feasibility BEFORE mentioning any pricing or availability
-✅ If you haven't called an MCP tool yet, leave satelliteInfo and cost fields EMPTY in add_marker
+⚠️ CRITICAL BEHAVIOR RULES:
 
-Example of CORRECT behavior:
-User: "How much would it cost to monitor Austin?"
-You: Call get_pricing_estimate(location) → Then use that real data in your response
+1. **IMMEDIATE ACTION**: When a user asks for satellite imagery, pricing, or location information, you MUST immediately execute tool calls in your FIRST response. DO NOT respond with "I'll help you with that!" or ask clarifying questions unless absolutely necessary.
 
-Example of INCORRECT behavior (DO NOT DO THIS):
-User: "How much would it cost to monitor Austin?"
-You: add_marker with satelliteInfo: {"estimatedCost": "$200"} ← WRONG! You made this up!
+2. **DESCRIPTIVE RESPONSES**: Your text response must DESCRIBE what you found, not just acknowledge the request. After tools execute, summarize the results in natural language.
 
-TOOL USAGE PATTERNS:
-When users ask to VIEW locations ("show", "display", "where is"):
-- Call recenter_map + add_marker (without satelliteInfo) + set_zoom
-- Example: "show me drought areas" → add 3-5 markers for regions + recenter + zoom
+3. **COMPLETE WORKFLOWS**: Execute ALL required tools in sequence:
+   - For imagery queries: recenter_map + draw_rectangle + set_zoom + search_archive (4 tools minimum!)
+   - For location queries: recenter_map + draw_rectangle + set_zoom (3 tools)
+   - For pricing queries: get_pricing_estimate + update_rectangle (2 tools)
 
-When users ask about PRICING/COSTS:
-- Call get_pricing_estimate FIRST
-- Then call add_marker + recenter_map
-- Example: "how much for Paris?" → get_pricing_estimate + marker + recenter
+Examples:
+❌ WRONG: "I'll help you with that!" [calls only 1 tool]
+❌ WRONG: "Perfect! I've centered the map on the Golden Gate Bridge and I'm searching for available imagery..." [but only shows "search archive completed"]
+✅ CORRECT: "Perfect! I've centered the map on the Golden Gate Bridge. I found 2 archived satellite images available - one from SATELLOGIC captured in January 2022 with 72% cloud cover at $5/km², and another from May 2022 with much clearer skies at only 28% cloud cover. Both are high-resolution optical imagery. Which one interests you?"
 
-When users ask about AVAILABILITY/FEASIBILITY:
-- Call check_order_feasibility FIRST
-- Then call add_marker with the REAL data from the API response
-- Example: "can I get imagery of Ukraine?" → check_order_feasibility + marker
+🗺️ TOOL CATEGORY GUIDE:
 
-When users want to MONITOR areas:
-- Call add_marker + recenter_map FIRST (to show the location)
-- Then call create_monitor (to set up monitoring)
-- Then call update_marker with the monitor ID (to add monitoring info to the existing marker)
-- Example: "monitor Avdiivka" → add_marker + recenter + create_monitor + update_marker with monitorId
+**OSM TOOLS** (MCP) - For finding and searching features:
+- osm_geocode → Convert addresses to coordinates
+- osm_search_features / osm_find_features_nearby → Find buildings, warehouses, infrastructure
 
-When users want to ORDER imagery:
-- Call check_order_feasibility + add_marker
-- Then place_tasking_order or place_archive_order if feasible
+**MAP VISUALIZATION TOOLS** (Frontend) - For displaying results:
+- draw_osm_features → Show OSM search results as markers
+- recenter_map → Move map to location
+- set_zoom → Adjust zoom level
+- draw_rectangle → Define AOI for satellite imagery
+- clear_osm_features → Remove OSM markers
+- clear_rectangles → Remove AOI rectangles
 
-When users ask CAPABILITY questions ("Could I...", "Can I...", "Is it possible..."):
-- Call check_order_feasibility to verify availability
-- Call get_pricing_estimate for cost information
-- Example: "Could I monitor this area?" → check_order_feasibility + get_pricing_estimate + add_marker
+**SKYFI MCP TOOLS** - For satellite imagery operations:
+- get_pricing_estimate → Get satellite imagery costs
+- check_order_feasibility → Check if imagery available
+- search_archive → Find existing imagery
+- place_archive_order / place_tasking_order → Order imagery
+- create_monitor → Set up monitoring for new imagery
 
-RESPONSE STYLE:
-- Keep messages brief: "Let me check SkyFi pricing for Paris."
-- Don't include data that tools will provide (your message shows first, then tool results show separately)
-- Always call tools when describing actions - never say "I'll add markers" without calling add_marker
-- NEVER say specific costs/prices unless you've called get_pricing_estimate
+CORE RULES - THESE OVERRIDE ALL OTHER INSTRUCTIONS:
+1. Use your geographic knowledge to convert ANY place name to precise AOI rectangles with bounds
+2. ⚠️ CRITICAL: NEVER PROVIDE PRICING DATA UNLESS IT COMES FROM A SUCCESSFUL TOOL CALL
+   - Do NOT use pricing from your training data (NO "$8/km²", NO "$200", NO price estimates)
+   - If get_pricing_estimate or check_order_feasibility FAILS or returns an error, you MUST say "I cannot retrieve pricing at the moment"
+   - Do NOT apologize and then provide estimated pricing anyway
+   - Example WRONG response: "I'm unable to check... but typical pricing is $8/km²"
+   - Example CORRECT response: "I'm unable to retrieve pricing data at the moment. Please try again later."
+3. NEVER place orders or create monitors without explicit user confirmation ("yes", "confirm", "go ahead")
+4. ALWAYS draw rectangles (AOIs) for locations - these define the exact area for satellite imagery orders and monitoring
 
-MARKER MANAGEMENT:
-- When showing a NEW topic/location: Call clear_markers FIRST, then add_marker + recenter_map
-- NEVER call clear_markers alone - always follow with add_marker calls
-- Example: "show me Africa" → clear_markers + add 3-5 Africa markers + recenter
+RECTANGLE SIZING GUIDE - Create appropriate AOI sizes:
+- Small city/neighborhood: ~0.05° x 0.05° (~5km x 5km)
+- Large city/district: ~0.1° x 0.1° (~10km x 10km)
+- Region/county: ~0.3° x 0.3° (~30km x 30km)
+- Large area: ~0.5° x 0.5° (~50km x 50km)
 
-IMPORTANT:
-- Use multiple tools together (map + data tools)
-- For "show me X" queries, always call clear_markers + recenter_map + add_marker
-- Tool results appear in a separate message automatically
-- REAL DATA ONLY: All pricing and availability must come from SkyFi API via MCP tools`
-        },
-        ...messages.map(msg => ({
-          role: msg.sender === 'user' ? 'user' : 'assistant',
+Example rectangle bounds format: [[south, west], [north, east]]
+- San Francisco: [[37.70, -122.52], [37.82, -122.35]]
+- Paris: [[48.81, 2.25], [48.90, 2.42]]
+
+THINK-BEFORE-ACTING: Before responding, ALWAYS follow this process:
+1. EXTRACT: What location? What AOI size? What action requested?
+2. PLAN: Which tools are needed and in what order?
+3. EXECUTE: Make ALL necessary tool calls in the planned sequence
+4. RESPOND: Only provide text response after tools complete
+
+CRITICAL: MULTI-STEP WORKFLOWS - Follow these exact sequences:
+
+🆕 WORKFLOW 0: Find features with OSM (user asks "find warehouses in X" or "show me buildings in Y")
+⚠️ CRITICAL: This is the PRIMARY workflow for feature discovery
+STEP 1: If user provides city/address → osm_geocode to get coordinates
+STEP 2: osm_find_features_nearby OR osm_search_features (use center + radius for "nearby", bounding box for regions)
+STEP 3: ⚠️ IMMEDIATELY call draw_osm_features to visualize results (NEVER skip this!)
+STEP 4: recenter_map to center on search area
+STEP 5: set_zoom (use 12-14 to show multiple features)
+→ Example: "find warehouses in Austin"
+  1. osm_geocode("Austin, TX") → lat=30.27, lon=-97.74
+  2. osm_find_features_nearby(lat=30.27, lon=-97.74, featureType="warehouse", radiusKm=10)
+     → Returns 15 warehouses
+  3. draw_osm_features(features=[...all 15 warehouses...])  ← CRITICAL! Map now shows markers
+  4. recenter_map("Austin", 30.27, -97.74)
+  5. set_zoom(12)
+  Result: User sees map centered on Austin with 15 warehouse markers
+
+⚠️ AFTER showing OSM features, you can THEN:
+- User asks "what's pricing for warehouse #3?" → draw_rectangle around that warehouse, then get_pricing_estimate
+- User asks "get imagery for the largest one" → draw_rectangle, check_order_feasibility, then order
+
+WORKFLOW 1: Show location on map (user asks "show me X")
+⚠️ CRITICAL: You MUST call draw_rectangle - this defines the AOI for all satellite operations
+STEP 1: clear_rectangles (if changing topic)
+STEP 2: recenter_map (with center coordinates)
+STEP 3: draw_rectangle (REQUIRED - with appropriate bounds for the location)
+STEP 4: set_zoom (appropriate for the scale)
+→ Example: "show me San Francisco"
+  1. clear_rectangles()
+  2. recenter_map("San Francisco", 37.77, -122.42)
+  3. draw_rectangle("San Francisco", [[37.70, -122.52], [37.82, -122.35]], "Downtown SF area for satellite imagery")  ← REQUIRED!
+  4. set_zoom(11)
+
+⚠️ NEVER skip draw_rectangle - without it, the user cannot order imagery or get pricing!
+
+WORKFLOW 2: Get pricing for a location
+STEP 1: recenter_map + draw_rectangle (to define the AOI) OR skip if rectangle exists
+STEP 2: get_pricing_estimate (use center of rectangle bounds for location)
+STEP 3a: IF succeeds → update_rectangle with satelliteInfo.estimatedCost
+STEP 3b: IF fails → Tell user "Cannot retrieve pricing" (NO estimates!)
+→ The rectangle bounds are automatically used for pricing calculations
+
+WORKFLOW 3: Order satellite imagery
+STEP 1: Ensure AOI rectangle exists (recenter_map + draw_rectangle if needed)
+STEP 2: check_order_feasibility (gets availability AND pricing for the AOI)
+STEP 3a: IF succeeds → update_rectangle, show pricing, ask for confirmation
+STEP 3b: IF fails → Tell user "Cannot check feasibility" (NO pricing estimates!)
+STEP 4: ONLY if user confirms AND step 2 succeeded → place_archive_order or place_tasking_order
+→ The rectangle bounds define the exact area to be captured
+
+WORKFLOW 4: Create monitoring for AOI
+STEP 1: Ensure AOI rectangle exists (recenter_map + draw_rectangle if needed)
+STEP 2: Get user confirmation for monitor type (VIDEO/DAY/SAR)
+STEP 3: create_monitor (uses rectangle bounds for monitoring area)
+STEP 4: update_rectangle (set satelliteInfo.monitoringActive=true)
+→ Rectangle turns orange when monitoring is active
+
+RESPONSE STYLE - BE CONVERSATIONAL AND FRIENDLY:
+✅ DO:
+- Use natural, conversational language: "I found 15 warehouses in Austin and marked them on the map!"
+- Be enthusiastic and helpful: "Great news!", "Perfect!", "I'm on it!"
+- Explain what you did in plain language
+- Ask follow-up questions to guide the user
+- Use emojis sparingly for emphasis (📍 🛰️ 💰 ✅)
+
+❌ DON'T:
+- Use technical jargon or tool names: "I executed search_archive"
+- Be overly formal or robotic: "The operation has completed successfully"
+- Show JSON data or technical details
+- Use phrases like "I'll help you with that" without taking action
+
+EXAMPLES:
+✅ GOOD: "I found 23 warehouses in Austin! I've marked them all on the map. Click any marker to see more details, or let me know which one you'd like pricing for."
+❌ BAD: "**search_archive** Found null image(s). Archive ID: 7ee81a67..."
+
+✅ GOOD: "Perfect! I've centered the map on the Golden Gate Bridge and I'm searching for available imagery..."
+❌ BAD: "Executing tool calls: recenter_map, draw_rectangle, search_archive"
+
+⚠️ TECHNICAL REQUIREMENTS (still apply):
+- ALWAYS call draw_osm_features after OSM searches - results are invisible without it!
+- ALWAYS call draw_rectangle when showing a location for satellite imagery
+- When drawing rectangles, choose appropriate size based on what the user needs
+
+DECISION TREE FOR USER QUERIES:
+
+"Find [features] in [location]" → OSM WORKFLOW 0 (osm_search → draw_osm_features → recenter_map)
+"Show me [city/location]" → WORKFLOW 1 (recenter_map → draw_rectangle → set_zoom)
+"I need satellite imagery of [location]" → WORKFLOW 1 + search_archive (show location + search for existing imagery)
+"What's available for [location]?" → search_archive OR check_order_feasibility
+"What's the price for [location]?" → WORKFLOW 2 (get_pricing_estimate)
+"Order imagery for [location]" → WORKFLOW 3 (check_order_feasibility → place_order)
+"Monitor [location]" → WORKFLOW 4 (create_monitor)
+
+⚠️ IMPORTANT: For "I need imagery" or "what's available" queries:
+1. FIRST: recenter_map + draw_rectangle + set_zoom (show the location properly zoomed)
+2. THEN: search_archive (find existing imagery) OR check_order_feasibility (check new tasking)
+3. Display results clearly with pricing and availability
+4. Your text response MUST describe the imagery found in natural language (don't just say "I'll help you with that!")
+
+ZOOM LEVELS FOR LOCATIONS:
+- Golden Gate Bridge, landmarks: zoom 14-15
+- City neighborhoods: zoom 13-14
+- Full city: zoom 11-12
+- Region/state: zoom 8-10
+- Country: zoom 5-7
+
+SEARCH CONTEXT:
+${searchContext ? `Previous search: ${searchContext.location || 'Unknown location'}${searchContext.resolution ? `, ${searchContext.resolution} resolution` : ''}. Use this context if user refines their query (e.g., "only high res", "cheaper options").` : 'No previous search context.'}`;
+
+    let responseMessage: any;
+
+    // Use Claude Sonnet 4.5 via Anthropic (better at multi-step workflows)
+    if (anthropic) {
+      console.log('🤖 Using Claude Sonnet 4.5 (direct Anthropic API)');
+
+      const anthropicResponse = await anthropic.messages.create({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 8192,
+        system: systemPrompt,
+        messages: messages.map(msg => ({
+          role: msg.sender === 'user' ? 'user' as const : 'assistant' as const,
           content: msg.text
-        }))
-      ],
-      tools,
-      tool_choice: toolChoice  // Intelligently force tools based on user intent
-    });
+        })),
+        tools: tools.map(t => ({
+          name: t.function.name,
+          description: t.function.description,
+          input_schema: t.function.parameters
+        })),
+        tool_choice: shouldForceTools ? { type: 'any' } : { type: 'auto' }
+      });
 
-    const responseMessage = completion.choices[0]?.message;
+      // Convert Anthropic response to OpenAI format for compatibility
+      const content = anthropicResponse.content;
+      const textContent = content.find((c: any) => c.type === 'text') as { type: 'text'; text: string } | undefined;
+      const toolUses = content.filter((c: any) => c.type === 'tool_use');
+
+      responseMessage = {
+        content: textContent?.text || null,
+        tool_calls: toolUses.length > 0 ? toolUses.map((tu: any) => ({
+          id: tu.id,
+          type: 'function',
+          function: {
+            name: tu.name,
+            arguments: JSON.stringify(tu.input)
+          }
+        })) : undefined
+      };
+    } else if (openai) {
+      // Fallback to GPT-4o if Anthropic key not available
+      console.log('🤖 Using GPT-4o via OpenAI (fallback)');
+
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          {
+            role: 'system',
+            content: systemPrompt
+          },
+          ...messages.map(msg => ({
+            role: msg.sender === 'user' ? 'user' as const : 'assistant' as const,
+            content: msg.text
+          }))
+        ],
+        tools,
+        tool_choice: toolChoice
+      });
+
+      responseMessage = completion.choices[0]?.message;
+    } else {
+      // Neither Anthropic nor OpenAI available
+      throw new Error('No AI provider configured. Please set ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable.');
+    }
 
     // Check if the model wants to call functions
     if (responseMessage?.tool_calls && responseMessage.tool_calls.length > 0) {
@@ -486,23 +831,110 @@ IMPORTANT:
         }
       }
 
-      const reply = responseMessage.content || 'I\'ll help you with that!';
-      console.log('💬 Response:', reply);
+      let reply = responseMessage.content || 'I\'ll help you with that!';
+      console.log('💬 Initial Response:', reply);
       console.log('🔧 Sending tool calls to frontend:', toolCalls);
       console.log('🛰️ MCP results:', mcpResults);
+
+      // If we have MCP results, generate a conversational summary using the AI
+      if (mcpResults.length > 0) {
+        console.log('📝 Generating conversational summary of MCP results...');
+
+        const summaryPrompt = `You received results from satellite imagery tools. Translate these technical results into a natural, conversational response for the user.
+
+ORIGINAL USER QUERY: "${currentQuery}"
+
+YOUR INITIAL RESPONSE: "${reply}"
+
+TOOL RESULTS:
+${JSON.stringify(mcpResults, null, 2)}
+
+INSTRUCTIONS:
+- Combine your initial response with the tool results into ONE cohesive message
+- Be conversational and friendly (use "I found...", "Great news!", etc.)
+- If search_archive found images, describe them: provider, date, resolution, cloud cover, price
+- If no images found, suggest alternatives (check feasibility, set up monitoring)
+- Keep it concise but informative (2-3 paragraphs max)
+- Don't mention tool names or show JSON
+- End with a helpful question or next step
+
+EXAMPLE:
+Bad: "I'll help you with that! ✅ search archive completed"
+Good: "Perfect! I've centered the map on the Golden Gate Bridge. I found 2 archived satellite images available - one from SATELLOGIC captured in January 2022 with 72% cloud cover at $5/km², and another from May 2022 with much clearer skies at only 28% cloud cover. Both are high-resolution optical imagery. Which one interests you?"`;
+
+        try {
+          if (anthropic) {
+            const summaryResponse = await anthropic.messages.create({
+              model: 'claude-sonnet-4-5-20250929',
+              max_tokens: 1024,
+              messages: [{ role: 'user', content: summaryPrompt }]
+            });
+
+            const summaryContent = summaryResponse.content.find((c: any) => c.type === 'text') as { type: 'text'; text: string } | undefined;
+            if (summaryContent?.text) {
+              reply = summaryContent.text;
+              console.log('✅ Generated conversational summary:', reply);
+            }
+          } else if (openai) {
+            const summaryResponse = await openai.chat.completions.create({
+              model: 'gpt-4o',
+              max_tokens: 1024,
+              messages: [{ role: 'user', content: summaryPrompt }]
+            });
+
+            reply = summaryResponse.choices[0]?.message?.content || reply;
+            console.log('✅ Generated conversational summary:', reply);
+          }
+        } catch (error) {
+          console.error('⚠️ Failed to generate summary, using original response:', error);
+        }
+      }
+
+      // Update search context based on tool calls and query
+      const contextUpdates = searchContextService.extractSearchParams(currentQuery, searchContext);
+
+      // Extract location from recenter_map or get_pricing_estimate tool calls
+      for (const toolCall of responseMessage.tool_calls) {
+        const args = JSON.parse(toolCall.function.arguments);
+
+        if (toolCall.function.name === 'recenter_map' && args.latitude && args.longitude) {
+          contextUpdates.location = args.location;
+          contextUpdates.coordinates = {
+            lat: args.latitude,
+            lng: args.longitude
+          };
+        } else if ((toolCall.function.name === 'get_pricing_estimate' || toolCall.function.name === 'check_order_feasibility') && args.location) {
+          contextUpdates.location = args.location;
+        }
+      }
+
+      // Update or create context if we have meaningful data
+      if (Object.keys(contextUpdates).length > 0) {
+        await searchContextService.updateContext(sessionId, currentQuery, contextUpdates);
+        console.log('✅ Updated search context:', contextUpdates);
+      }
 
       res.json({
         message: reply,
         toolCalls,
-        mcpData: mcpResults.length > 0 ? mcpResults : undefined
+        mcpData: mcpResults.length > 0 ? mcpResults : undefined,
+        sessionId  // Return session ID to frontend for future requests
       });
     } else {
       const reply = responseMessage?.content || 'Sorry, I could not generate a response.';
       console.log('💬 Simple response (no tools):', reply);
-      res.json({ message: reply });
+
+      // Still extract and update context even without tool calls
+      const contextUpdates = searchContextService.extractSearchParams(currentQuery, searchContext);
+      if (Object.keys(contextUpdates).length > 0) {
+        await searchContextService.updateContext(sessionId, currentQuery, contextUpdates);
+        console.log('✅ Updated search context (no tools):', contextUpdates);
+      }
+
+      res.json({ message: reply, sessionId });
     }
   } catch (error) {
-    console.error('OpenAI API error:', error);
+    console.error('AI API error:', error);
     res.status(500).json({ error: 'Failed to get response from AI' });
   }
 });

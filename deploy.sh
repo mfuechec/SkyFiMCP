@@ -74,9 +74,10 @@ run_remote "cd $APP_DIR && pnpm install && pnpm build"
 # Create environment file
 echo -e "${YELLOW}Step 6: Creating environment file...${NC}"
 
-# Read API key from local .env file
+# Read API keys from local .env file
 if [ -f ".env" ]; then
-    SKYFI_KEY=$(grep "^SKYFI_API_KEY=" .env | cut -d '=' -f2)
+    SKYFI_KEY=$(grep "^SKYFI_API_KEY=" .env | cut -d '=' -f2 | tr -d '"')
+    ANTHROPIC_KEY=$(grep "^ANTHROPIC_API_KEY=" .env | cut -d '=' -f2 | tr -d '"')
 fi
 
 if [ -z "$SKYFI_KEY" ]; then
@@ -87,7 +88,11 @@ if [ -z "$SKYFI_KEY" ]; then
         exit 1
     fi
 else
-    echo -e "${GREEN}Using API key from local .env file${NC}"
+    echo -e "${GREEN}Using API keys from local .env file${NC}"
+fi
+
+if [ -z "$ANTHROPIC_KEY" ]; then
+    echo -e "${YELLOW}Warning: ANTHROPIC_API_KEY not found in .env${NC}"
 fi
 
 run_remote "cat > $APP_DIR/.env << 'EOF'
@@ -95,6 +100,7 @@ NODE_ENV=production
 MCP_TRANSPORT=http
 PORT=3000
 SKYFI_API_KEY=$SKYFI_KEY
+ANTHROPIC_API_KEY=$ANTHROPIC_KEY
 EOF"
 
 # Create systemd service
@@ -108,7 +114,7 @@ After=network.target
 Type=simple
 User=ec2-user
 WorkingDirectory=/opt/skyfi-mcp
-ExecStart=/usr/bin/node dist/index.js
+ExecStart=/usr/bin/node packages/mcp/dist/index.js
 Restart=always
 RestartSec=10
 Environment=NODE_ENV=production

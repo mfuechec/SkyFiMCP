@@ -12,15 +12,17 @@
   },
   "dependencies": {
     "@skyfi-mcp/shared": "workspace:*",
+    "@types/leaflet-draw": "^1.0.13",
+    "leaflet": "^1.9.4",
+    "leaflet-draw": "^1.0.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "leaflet": "^1.9.4",
     "react-leaflet": "^4.2.1"
   },
   "devDependencies": {
+    "@types/leaflet": "^1.9.8",
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.0",
-    "@types/leaflet": "^1.9.8",
     "@vitejs/plugin-react": "^4.2.1",
     "typescript": "^5.3.0",
     "vite": "^5.1.0"
